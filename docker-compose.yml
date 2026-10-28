@@ -1,0 +1,24 @@
+services:
+  quem-sou-eu:
+    build: .
+    container_name: quem-sou-eu-app
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      - PORT=5173
+      - NODE_ENV=production
+
+  # Cloudflare Tunnel para expor o jogo com domínio público, SSL e WebSockets
+  # Para ativar: docker compose --profile tunnel up -d
+  cloudflare-tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: quem-sou-eu-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
+    profiles:
+      - tunnel
+    depends_on:
+      - quem-sou-eu
