@@ -1,7 +1,7 @@
 {
   "name": "quem-sou-eu",
   "version": "1.0.0",
-  "description": "Multiplayer em tempo real do jogo 'Quem Sou Eu?' com dinamica estilo Gartic",
+  "description": "Multiplayer em tempo real do jogo 'Quem Sou Eu?' online",
   "private": true,
   "type": "module",
   "scripts": {

@@ -50,7 +50,7 @@ function renderHome(container) {
             ❓
           </div>
           <h1 class="text-3xl md:text-4xl font-black tracking-tight text-white m-0">QUEM SOU EU?</h1>
-          <p class="text-slate-400 text-xs md:text-sm font-medium mt-1">O jogo da palavra na testa estilo Gartic</p>
+          <p class="text-slate-400 text-xs md:text-sm font-medium mt-1">O clássico jogo da palavra na testa em tempo real</p>
         </div>
 
         <!-- Formulário de Jogador -->
