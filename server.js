@@ -30,6 +30,20 @@ const mimeTypes = {
 // Servidor de arquivos estáticos com suporte a SPA fallback
 async function serveStatic(req, res, url) {
   const requested = url.pathname === "/" ? "/index.html" : decodeURIComponent(url.pathname);
+
+  // Favicon fallback transparente para o novo logo SVG
+  if (requested === "/favicon.ico" || requested === "/favicon.svg") {
+    try {
+      const data = await readFile(join(publicDir, "images", "logo.svg"));
+      res.writeHead(200, {
+        "content-type": "image/svg+xml",
+        "cache-control": "public, max-age=86400"
+      });
+      res.end(data);
+      return;
+    } catch {}
+  }
+
   const safePath = normalize(requested).replace(/^(\.\.[/\\])+/, "");
   const filePath = join(publicDir, safePath);
 

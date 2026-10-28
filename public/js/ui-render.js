@@ -46,9 +46,7 @@ function renderHome(container) {
 
         <!-- Cabeçalho / Logo -->
         <div class="text-center mb-6">
-          <div class="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-gradient-to-tr from-cyan-500 to-indigo-600 text-4xl shadow-lg shadow-cyan-500/30 mb-3 animate-pulse-subtle">
-            ❓
-          </div>
+          <img src="/images/logo.svg" alt="Logo Quem Sou Eu" class="w-24 h-24 mx-auto mb-3 drop-shadow-2xl animate-pulse-subtle" />
           <h1 class="text-3xl md:text-4xl font-black tracking-tight text-white m-0">QUEM SOU EU?</h1>
           <p class="text-slate-400 text-xs md:text-sm font-medium mt-1">O clássico jogo da palavra na testa em tempo real</p>
         </div>

@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Gradiente principal do fundo (Roxo/Azul no topo direito -> Ciano na base esquerda) -->
+    <linearGradient id="bgGradient" x1="85%" y1="10%" x2="15%" y2="90%">
+      <stop offset="0%" stop-color="#5B4DF2" />
+      <stop offset="50%" stop-color="#4374E0" />
+      <stop offset="100%" stop-color="#3BA9DC" />
+    </linearGradient>
+
+    <!-- Gradiente da borda superior para efeito de volume 3D -->
+    <linearGradient id="borderHighlight" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#8FA0FF" stop-opacity="0.75" />
+      <stop offset="30%" stop-color="#5B4DF2" stop-opacity="0.15" />
+      <stop offset="100%" stop-color="#2980B9" stop-opacity="0.35" />
+    </linearGradient>
+
+    <!-- Gradiente 3D do ponto de interrogação (Coral claro -> Vermelho rosado) -->
+    <linearGradient id="questionGradient" x1="30%" y1="15%" x2="70%" y2="85%">
+      <stop offset="0%" stop-color="#FF758F" />
+      <stop offset="45%" stop-color="#FA4664" />
+      <stop offset="100%" stop-color="#D92643" />
+    </linearGradient>
+
+    <!-- Gradiente de brilho interno do ponto de interrogação -->
+    <linearGradient id="questionHighlight" x1="25%" y1="0%" x2="65%" y2="100%">
+      <stop offset="0%" stop-color="#FFB3C1" stop-opacity="0.75" />
+      <stop offset="50%" stop-color="#FF758F" stop-opacity="0.2" />
+      <stop offset="100%" stop-color="#D92643" stop-opacity="0" />
+    </linearGradient>
+
+    <!-- Sombra suave da base do ícone -->
+    <filter id="cardShadow" x="-15%" y="-15%" width="130%" height="135%">
+      <feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#1E5288" flood-opacity="0.35" />
+    </filter>
+
+    <!-- Sombra projetada pelo ponto de interrogação 3D -->
+    <filter id="questionShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="-6" dy="10" stdDeviation="8" flood-color="#1A3673" flood-opacity="0.45" />
+    </filter>
+
+    <!-- Desfoque leve para o brilho especular 3D -->
+    <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2.5" />
+    </filter>
+  </defs>
+
+  <!-- Quadrado arredondado unificado (Fundo + Borda 3D) -->
+  <rect x="38" y="38" width="436" height="436" rx="114" ry="114" fill="url(#bgGradient)" stroke="url(#borderHighlight)" stroke-width="4" filter="url(#cardShadow)" />
+
+  <!-- Grupo do Ponto de Interrogação com Sombra -->
+  <g filter="url(#questionShadow)">
+    <!-- Corpo da interrogação (com fill="none" explícito) -->
+    <path d="M 212 214 
+         C 212 182, 232 166, 258 166 
+         C 286 166, 306 184, 306 210 
+         C 306 234, 288 244, 271 255 
+         C 259 263, 255 273, 255 292" fill="none" style="fill: none;" stroke="url(#questionGradient)" stroke-width="38" stroke-linecap="round" stroke-linejoin="round" />
+
+    <!-- Brilho 3D superior na curva (com fill="none" explícito) -->
+    <path d="M 208 210 
+         C 208 180, 230 162, 256 162 
+         C 282 162, 300 178, 300 204 
+         C 300 226, 283 236, 267 247 
+         C 255 255, 251 265, 251 284" fill="none" style="fill: none;" stroke="url(#questionHighlight)" stroke-width="10" stroke-linecap="round" filter="url(#softGlow)" />
+
+    <!-- Ponto inferior -->
+    <circle cx="255" cy="346" r="19" fill="url(#questionGradient)" />
+
+    <!-- Brilho 3D no ponto inferior -->
+    <ellipse cx="251" cy="341" rx="9" ry="6" fill="#FFB3C1" fill-opacity="0.55" filter="url(#softGlow)" />
+  </g>
+</svg>
