@@ -4,11 +4,33 @@ import { renderCurrentScreen, updateTimerUI, showToast, triggerConfetti } from "
 import { appendChatMessage } from "./chat.js";
 
 export function initSocket() {
-  const socket = io();
+  if (typeof io === "undefined") {
+    console.warn("Aguardando carregamento da biblioteca Socket.io...");
+    setTimeout(initSocket, 500);
+    return;
+  }
+
+  // URL do backend: usa a mesma origem ou URL configurada
+  const urlParams = new URLSearchParams(window.location.search);
+  const customBackend = urlParams.get("backend") || localStorage.getItem("qse_backend_url");
+  const backendUrl = customBackend || window.location.origin;
+
+  const socket = io(backendUrl, {
+    transports: ["websocket", "polling"],
+    reconnectionAttempts: 10,
+    reconnectionDelay: 1000,
+    timeout: 10000
+  });
+
   state.socket = socket;
 
   socket.on("connect", () => {
     state.myId = socket.id;
+    console.log("✓ Conectado ao servidor WebSocket via:", backendUrl);
+  });
+
+  socket.on("connect_error", (err) => {
+    console.warn("Aviso de conexão com o backend WebSocket:", err.message);
   });
 
   // Atualização geral de estado da sala
@@ -27,7 +49,6 @@ export function initSocket() {
       }
     } else if (roomData.state === "playing" || roomData.state === "turn_celebration") {
       state.currentScreen = "game";
-      // Se acabou de virar o turno ou começar
       if (previousState === "lobby" || previousState === "word_suggestion" || previousState === "turn_celebration") {
         sound.playTurnChange();
       }
@@ -68,6 +89,6 @@ export function initSocket() {
   });
 
   socket.on("disconnect", () => {
-    showToast("Desconectado do servidor. Tentando reconectar...", "error");
+    console.warn("Desconectado do servidor WebSocket.");
   });
 }
