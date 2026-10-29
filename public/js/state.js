@@ -8,6 +8,9 @@ export const state = {
   playerName: localStorage.getItem("qse_name") || "",
   playerAvatar: localStorage.getItem("qse_avatar") || "🦊",
   
+  // Rascunho local de sugestão de palavra (preservado em atualizações de estado)
+  wordDraft: { word: "", category: "" },
+  
   // Dados da Sala Conectada
   roomCode: "",
   room: null, // snapshot seguro vindo do servidor

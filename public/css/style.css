@@ -16,12 +16,13 @@ body {
   font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
+  overflow-x: hidden;
 }
 
 /* Scrollbar estilizada */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
   background: rgba(15, 23, 42, 0.6);
@@ -32,6 +33,20 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(100, 116, 139, 0.7);
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.3);
+  border-radius: 9999px;
+}
+
+/* Previne que a rolagem do chat empurre a página para baixo */
+#chat-messages-container {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Animações */
@@ -48,6 +63,15 @@ body {
 @keyframes glow-turn {
   0%, 100% { box-shadow: 0 0 20px rgba(6, 182, 212, 0.4); }
   50% { box-shadow: 0 0 35px rgba(6, 182, 212, 0.8); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.25s ease-out forwards;
 }
 
 .animate-pulse-subtle {

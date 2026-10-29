@@ -1,6 +1,6 @@
 import { state, saveLocalPlayer, toggleSound } from "./state.js";
 import { sound } from "./audio.js";
-import { escapeHtml, sendChatMessage, sendQuickReaction } from "./chat.js";
+import { escapeHtml, sendChatMessage, sendPlayerGuess, sendQuickReaction, renderMessageElement } from "./chat.js";
 
 const AVATAR_LIST = ["🦊", "🦁", "🐼", "🐸", "🦄", "🚀", "🎭", "🎩", "👑", "🍕", "🥑", "🎸", "🐱", "🐶", "🐵", "🐯"];
 
@@ -33,14 +33,18 @@ export function renderCurrentScreen() {
 // 1. TELA INICIAL (HOME)
 // ==========================================
 function renderHome(container) {
-  // Pega código da URL caso tenha vindo via QR code ou link compartilhado
   const urlParams = new URLSearchParams(window.location.search);
   const roomQuery = (urlParams.get("room") || "").toUpperCase();
+
+  // Garante que o avatar inicial seja válido
+  if (!state.playerAvatar || !AVATAR_LIST.includes(state.playerAvatar)) {
+    state.playerAvatar = "🦊";
+  }
 
   container.innerHTML = `
     <div class="min-h-screen flex items-center justify-center p-4">
       <div class="glass-panel w-full max-w-md p-6 md:p-8 rounded-3xl shadow-2xl relative overflow-hidden">
-        <!-- Detalhe decorativo no topo -->
+        <!-- Detalhes decorativos no topo e fundo -->
         <div class="absolute -top-12 -left-12 w-32 h-32 bg-cyan-500/20 rounded-full blur-2xl"></div>
         <div class="absolute -bottom-12 -right-12 w-32 h-32 bg-pink-500/20 rounded-full blur-2xl"></div>
 
@@ -65,7 +69,7 @@ function renderHome(container) {
             />
           </div>
 
-          <!-- Seleção de Avatar -->
+          <!-- Seleção de Avatar com preservação confiável -->
           <div>
             <label class="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">Escolha seu Avatar</label>
             <div class="flex gap-2 overflow-x-auto pb-2 scrollbar-none py-1" id="avatar-selector">
@@ -140,21 +144,22 @@ function bindHomeEvents() {
   document.querySelectorAll(".avatar-option").forEach((btn) => {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".avatar-option").forEach((el) => {
-        el.className = el.className.replace("bg-cyan-500 ring-2 ring-cyan-300 scale-110 shadow-lg shadow-cyan-500/30", "bg-slate-800/80 hover:bg-slate-700");
+        el.className = "avatar-option flex-none w-11 h-11 text-2xl rounded-2xl flex items-center justify-center transition bg-slate-800/80 hover:bg-slate-700";
       });
       btn.className = "avatar-option flex-none w-11 h-11 text-2xl rounded-2xl flex items-center justify-center transition bg-cyan-500 ring-2 ring-cyan-300 scale-110 shadow-lg shadow-cyan-500/30";
       state.playerAvatar = btn.dataset.avatar;
+      localStorage.setItem("qse_avatar", state.playerAvatar);
     });
   });
 
-  // Criar Sala
+  // Criar Sala (envia nome e avatar selecionado)
   document.getElementById("btn-create-room")?.addEventListener("click", () => {
     const nameInput = document.getElementById("player-name-input");
     const name = nameInput.value.trim() || "Host";
     saveLocalPlayer(name, state.playerAvatar);
 
     sound.ensureContext();
-    state.socket.emit("create_room", { name, settings: {} }, (res) => {
+    state.socket.emit("create_room", { name, avatar: state.playerAvatar, settings: {} }, (res) => {
       if (res && res.success) {
         state.roomCode = res.code;
         state.room = res.room;
@@ -166,7 +171,7 @@ function bindHomeEvents() {
     });
   });
 
-  // Entrar na Sala
+  // Entrar na Sala (envia nome e avatar selecionado)
   document.getElementById("btn-join-room")?.addEventListener("click", () => {
     const nameInput = document.getElementById("player-name-input");
     const codeInput = document.getElementById("room-code-input");
@@ -181,7 +186,7 @@ function bindHomeEvents() {
     saveLocalPlayer(name, state.playerAvatar);
     sound.ensureContext();
 
-    state.socket.emit("join_room", { code, name }, (res) => {
+    state.socket.emit("join_room", { code, name, avatar: state.playerAvatar }, (res) => {
       if (res && res.success) {
         state.roomCode = res.code;
         state.room = res.room;
@@ -229,7 +234,7 @@ function renderLobby(container) {
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-12 gap-5">
-        <!-- Coluna 1: Convite & QR Code (Mobile e PC) -->
+        <!-- Coluna 1: Convite & QR Code -->
         <div class="md:col-span-4 glass-panel p-5 rounded-3xl flex flex-col items-center text-center">
           <h2 class="text-lg font-black text-white m-0">Convide seus Amigos</h2>
           <p class="text-xs text-slate-400 mt-1 mb-4">Escaneie o QR Code no celular para entrar na hora!</p>
@@ -433,7 +438,7 @@ function bindLobbyEvents(isHost, currentCategories) {
 }
 
 // ==========================================
-// 2.5 FASE DE SUGESTÃO DE PALAVRAS (NOVA MECÂNICA)
+// 2.5 FASE DE SUGESTÃO DE PALAVRAS COM PRESERVAÇÃO DE RASCUNHO
 // ==========================================
 function renderWordSuggestion(container) {
   const room = state.room;
@@ -443,6 +448,44 @@ function renderWordSuggestion(container) {
   const hasSubmitted = !!room.hasSubmittedMyWord;
   const submittedCount = room.submittedCount || 0;
   const totalPlayers = room.totalPlayers || room.players.length;
+
+  // REQUISITO: Se o formulário já existe na tela e o jogador ainda está digitando,
+  // NÃO destrói o formulário nem o innerHTML para não apagar o rascunho de quem está preenchendo!
+  const existingForm = document.getElementById("form-submit-word");
+  if (existingForm && !hasSubmitted) {
+    // Salva o que já está digitado no rascunho local
+    const wordInput = document.getElementById("input-suggest-word");
+    const catInput = document.getElementById("input-suggest-category");
+    if (wordInput) state.wordDraft.word = wordInput.value;
+    if (catInput) state.wordDraft.category = catInput.value;
+
+    // Atualiza apenas os contadores e a lista de jogadores sem tocar nos campos
+    const progressEl = document.getElementById("word-suggestion-progress");
+    if (progressEl) {
+      progressEl.textContent = `${submittedCount} / ${totalPlayers} Prontos`;
+    }
+
+    const listEl = document.getElementById("word-suggestion-players-list");
+    if (listEl) {
+      listEl.innerHTML = room.players.map((p) => {
+        const isMe = p.id === state.myId;
+        const isDone = p.hasSubmittedWord;
+        return `
+          <div class="flex items-center justify-between p-2 rounded-xl bg-slate-900/60 border ${isMe ? 'border-cyan-500/40' : 'border-slate-800'} text-xs">
+            <div class="flex items-center gap-2 overflow-hidden">
+              <span class="text-base">${escapeHtml(p.avatar)}</span>
+              <span class="font-bold text-white truncate">${escapeHtml(p.name)} ${isMe ? '<span class="text-[10px] text-cyan-400">(Você)</span>' : ''}</span>
+            </div>
+            ${isDone
+              ? '<span class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold text-[10px] border border-emerald-500/30 flex items-center gap-1">✅ Enviado</span>'
+              : '<span class="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold text-[10px] border border-amber-500/30 flex items-center gap-1 animate-pulse">✍️ Escrevendo...</span>'
+            }
+          </div>
+        `;
+      }).join("");
+    }
+    return;
+  }
 
   container.innerHTML = `
     <div class="min-h-screen flex items-center justify-center p-4">
@@ -491,6 +534,7 @@ function renderWordSuggestion(container) {
                     id="input-suggest-word"
                     maxlength="40"
                     placeholder="Ex: Silvio Santos, Bob Esponja, Capivara..."
+                    value="${escapeHtml(state.wordDraft?.word || '')}"
                     autocomplete="off"
                     class="glass-input w-full px-4 py-3 rounded-xl text-white font-bold text-base focus:ring-2 focus:ring-cyan-400 transition"
                   />
@@ -505,6 +549,7 @@ function renderWordSuggestion(container) {
                     id="input-suggest-category"
                     maxlength="30"
                     placeholder="Ex: Celebridade, Desenho, Animal, Amigo..."
+                    value="${escapeHtml(state.wordDraft?.category || '')}"
                     autocomplete="off"
                     class="glass-input w-full px-4 py-2.5 rounded-xl text-white text-sm"
                   />
@@ -525,11 +570,11 @@ function renderWordSuggestion(container) {
           <div class="md:col-span-5 glass-panel p-4 rounded-2xl border border-slate-700/60 flex flex-col">
             <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-700/50">
               <span class="text-xs font-bold uppercase text-slate-400">Progresso</span>
-              <span class="text-xs font-black text-cyan-300">${submittedCount} / ${totalPlayers} Prontos</span>
+              <span id="word-suggestion-progress" class="text-xs font-black text-cyan-300">${submittedCount} / ${totalPlayers} Prontos</span>
             </div>
 
             <!-- Lista de Jogadores -->
-            <div class="space-y-2 overflow-y-auto max-h-48 pr-1">
+            <div id="word-suggestion-players-list" class="space-y-2 overflow-y-auto max-h-48 pr-1">
               ${room.players.map((p) => {
                 const isMe = p.id === state.myId;
                 const isDone = p.hasSubmittedWord;
@@ -554,7 +599,7 @@ function renderWordSuggestion(container) {
                 <button
                   id="btn-force-distribute"
                   class="w-full py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-slate-600 transition"
-                  title="Inicia a partida preenchendo automaticamente quem não enviou"
+                  title="Inicia a rodada preenchendo automaticamente quem não enviou"
                 >
                   ⚡ Iniciar Rodada Agora
                 </button>
@@ -571,11 +616,20 @@ function renderWordSuggestion(container) {
 
 function bindWordSuggestionEvents(hasSubmitted) {
   if (!hasSubmitted) {
+    const wordInput = document.getElementById("input-suggest-word");
+    const catInput = document.getElementById("input-suggest-category");
+
+    // Sincroniza digitação em tempo real no rascunho local
+    wordInput?.addEventListener("input", (e) => {
+      state.wordDraft.word = e.target.value;
+    });
+    catInput?.addEventListener("input", (e) => {
+      state.wordDraft.category = e.target.value;
+    });
+
     const form = document.getElementById("form-submit-word");
     form?.addEventListener("submit", (e) => {
       e.preventDefault();
-      const wordInput = document.getElementById("input-suggest-word");
-      const catInput = document.getElementById("input-suggest-category");
       const word = wordInput?.value?.trim();
       const category = catInput?.value?.trim() || "Geral";
 
@@ -594,14 +648,16 @@ function bindWordSuggestionEvents(hasSubmitted) {
         if (res && !res.success) {
           showToast(res.error || "Erro ao enviar palavra.", "error");
         } else {
-          showToast("Palavra enviada com sucesso!", "success");
+          // Limpa o rascunho local após envio com sucesso
+          state.wordDraft = { word: "", category: "" };
+          showToast("Palavra secreta enviada com sucesso!", "success");
         }
       });
     });
   }
 
   document.getElementById("btn-force-distribute")?.addEventListener("click", () => {
-    if (confirm("Deseja iniciar a rodada agora? (Quem não enviou receberá uma palavra automática do jogo)")) {
+    if (confirm("Deseja iniciar a rodada agora? (Quem não enviou receberá uma palavra automática)")) {
       sound.ensureContext();
       state.socket.emit("game:distribute", { code: state.roomCode });
     }
@@ -609,23 +665,41 @@ function bindWordSuggestionEvents(hasSubmitted) {
 }
 
 // ==========================================
-// 3. TELA DE JOGO (DINÂMICA GARTIC + TESTA)
+// 3. TELA DE JOGO COM REGRAS ESTRITAS DE TURNO
 // ==========================================
 function renderGame(container) {
   const room = state.room;
   if (!room) return;
 
   const isMyTurn = room.activePlayerId === state.myId;
+  const isCelebration = room.state === "turn_celebration";
   const activePlayer = room.players.find((p) => p.id === room.activePlayerId);
   const myPlayer = room.players.find((p) => p.id === state.myId);
   const turnSeconds = room.turnSecondsRemaining ?? room.settings?.turnTime ?? 60;
   const totalSeconds = room.settings?.turnTime || 60;
   const timePercent = Math.max(0, Math.min(100, (turnSeconds / totalSeconds) * 100));
 
+  const turnPhase = room.turnPhase || "awaiting_question";
+  const currentQuestion = room.currentQuestion || null;
+  const turnResult = room.turnResult || null;
+  const wordRevealed = room.wordRevealed || null;
+
+  // Placeholder inteligente do chat de acordo com a fase
+  let chatPlaceholder = "Envie uma dica ou converse...";
+  if (isMyTurn) {
+    if (turnPhase === "awaiting_question") {
+      chatPlaceholder = "Passo 1: Digite sua pergunta da vez...";
+    } else if (turnPhase === "awaiting_responses") {
+      chatPlaceholder = "Aguardando respostas dos amigos...";
+    } else if (turnPhase === "awaiting_guess_or_pass") {
+      chatPlaceholder = "Digite seu palpite único aqui ou no cartão...";
+    }
+  }
+
   container.innerHTML = `
-    <div class="min-h-screen flex flex-col p-2 md:p-4 max-w-7xl mx-auto">
+    <div class="h-screen max-h-screen flex flex-col p-2 md:p-3 max-w-7xl mx-auto overflow-hidden">
       <!-- Barra Superior: Info da Rodada e Cronômetro -->
-      <header class="glass-panel px-4 py-2.5 rounded-2xl mb-3 flex items-center justify-between gap-3">
+      <header class="glass-panel px-4 py-2 rounded-2xl mb-2 flex items-center justify-between gap-3 flex-shrink-0">
         <div class="flex items-center gap-2">
           <span class="px-2.5 py-1 rounded-xl bg-cyan-500/20 text-cyan-300 font-black text-xs md:text-sm border border-cyan-500/30">
             Rodada ${room.currentRound} de ${room.settings?.totalRounds || 3}
@@ -635,13 +709,13 @@ function renderGame(container) {
 
         <!-- Cronômetro Central -->
         <div class="flex-1 max-w-md mx-2 flex flex-col items-center">
-          <div class="flex items-center gap-2 mb-1">
-            <span class="text-xs font-bold text-slate-300">Tempo Restante:</span>
+          <div class="flex items-center gap-2 mb-0.5">
+            <span class="text-xs font-bold text-slate-300">Tempo:</span>
             <span id="timer-seconds-display" class="font-black text-sm md:text-base ${turnSeconds <= 10 ? 'text-rose-400 animate-pulse' : 'text-cyan-300'}">
               ${turnSeconds}s
             </span>
           </div>
-          <div class="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden border border-slate-700/60">
+          <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden border border-slate-700/60">
             <div
               id="timer-progress-bar"
               class="h-full transition-all duration-1000 rounded-full ${turnSeconds <= 10 ? 'bg-rose-500' : turnSeconds <= 25 ? 'bg-amber-400' : 'bg-gradient-to-r from-cyan-400 to-teal-400'}"
@@ -660,41 +734,41 @@ function renderGame(container) {
         </div>
       </header>
 
-      <!-- Layout Principal estilo Gartic: 3 Colunas no PC, Empilhado no Celular -->
-      <div class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0">
+      <!-- Layout Principal estilo Gartic: 3 Colunas com rolagem interna estrita -->
+      <div class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0 overflow-y-auto lg:overflow-hidden pb-1">
         <!-- Coluna Esquerda: Placar e Jogadores Conectados -->
-        <div class="lg:col-span-3 glass-panel p-3.5 rounded-3xl flex flex-col max-h-[350px] lg:max-h-full overflow-hidden">
-          <h3 class="text-xs font-black uppercase text-slate-400 tracking-wider mb-2 flex items-center justify-between">
+        <div class="lg:col-span-3 glass-panel p-3 rounded-3xl flex flex-col max-h-[220px] lg:max-h-full min-h-0 overflow-hidden flex-shrink-0">
+          <h3 class="text-xs font-black uppercase text-slate-400 tracking-wider mb-2 flex items-center justify-between flex-shrink-0">
             <span>Classificação</span>
             <span>🏆 Pontos</span>
           </h3>
 
-          <div class="flex-1 overflow-y-auto space-y-2 pr-1">
+          <div class="flex-1 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
             ${[...room.players]
               .sort((a, b) => b.score - a.score)
               .map((p, idx) => {
                 const isActive = p.id === room.activePlayerId;
                 const isMe = p.id === state.myId;
                 return `
-                  <div class="flex items-center justify-between p-2.5 rounded-2xl transition border ${
+                  <div class="flex items-center justify-between p-2 rounded-2xl transition border ${
                     isActive
-                      ? 'bg-cyan-950/40 border-cyan-400 shadow-md shadow-cyan-500/20 active-turn-ring'
+                      ? 'bg-cyan-950/50 border-cyan-400 shadow-md shadow-cyan-500/20 active-turn-ring'
                       : isMe
                       ? 'bg-slate-800/80 border-slate-600'
                       : 'bg-slate-900/50 border-slate-800'
                   }">
                     <div class="flex items-center gap-2 overflow-hidden">
                       <span class="text-xs font-black text-slate-400 w-4">${idx + 1}º</span>
-                      <span class="text-xl">${escapeHtml(p.avatar)}</span>
+                      <span class="text-lg">${escapeHtml(p.avatar)}</span>
                       <div class="overflow-hidden">
-                        <p class="text-xs md:text-sm font-bold text-white truncate m-0 flex items-center gap-1">
+                        <p class="text-xs font-bold text-white truncate m-0 flex items-center gap-1">
                           ${escapeHtml(p.name)}
                           ${isMe ? '<span class="text-[9px] text-cyan-300">(Você)</span>' : ''}
                         </p>
-                        ${isActive ? '<span class="text-[10px] font-black text-cyan-400">VEZ DELE(A) 🎯</span>' : ''}
+                        ${isActive ? '<span class="text-[9px] font-black text-cyan-400">VEZ DELE(A) 🎯</span>' : ''}
                       </div>
                     </div>
-                    <span class="font-black text-sm text-amber-300 ml-2">${p.score}</span>
+                    <span class="font-black text-xs text-amber-300 ml-2">${p.score}</span>
                   </div>
                 `;
               })
@@ -702,116 +776,235 @@ function renderGame(container) {
           </div>
         </div>
 
-        <!-- Coluna Central: A MESA E A TESTA DO JOGADOR DA VEZ -->
-        <div class="lg:col-span-5 flex flex-col gap-3 min-h-0">
-          <!-- O CARTÃO NA TESTA -->
-          <div class="glass-panel p-5 rounded-3xl flex-1 flex flex-col items-center justify-center text-center relative overflow-hidden">
-            ${isMyTurn ? `
-              <!-- VOCÊ É O JOGADOR DA VEZ: VOCÊ NÃO VÊ A SUA PALAVRA! -->
-              <div class="w-full flex flex-col items-center card-my-forehead p-6 rounded-3xl bg-gradient-to-b from-amber-500/20 to-slate-900/60 border-2 border-amber-400/60">
-                <div class="text-4xl md:text-5xl mb-2 animate-bounce">❓</div>
-                <span class="px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 text-xs font-black uppercase tracking-wider mb-3 border border-amber-500/40">
+        <!-- Coluna Central: A MESA E O CARTÃO NA TESTA -->
+        <div class="lg:col-span-5 flex flex-col gap-2 min-h-0 flex-shrink-0 lg:flex-shrink">
+          <div class="glass-panel p-4 md:p-5 rounded-3xl flex-1 flex flex-col items-center justify-center text-center relative overflow-hidden">
+            ${isCelebration ? `
+              <!-- ESTADO DE CELEBRAÇÃO / TRANSIÇÃO ENTRE TURNOS -->
+              <div class="w-full flex flex-col items-center p-5 rounded-3xl bg-slate-900/90 border-2 ${
+                turnResult?.outcome === 'correct' ? 'border-amber-400 shadow-xl shadow-amber-500/20' : 'border-rose-500/60 shadow-xl shadow-rose-500/20'
+              }">
+                <div class="text-4xl md:text-5xl mb-2 animate-bounce">
+                  ${turnResult?.outcome === 'correct' ? '🎉' : turnResult?.outcome === 'timeout' ? '⏰' : turnResult?.outcome === 'skipped' ? '⏭️' : '❌'}
+                </div>
+                <h2 class="text-lg md:text-2xl font-black text-white m-0">
+                  ${
+                    turnResult?.outcome === 'correct'
+                      ? `PARABÉNS! ${escapeHtml(turnResult.player)} ACERTOU!`
+                      : turnResult?.outcome === 'timeout'
+                      ? `TEMPO ESGOTADO PARA ${escapeHtml(turnResult.player)}!`
+                      : turnResult?.outcome === 'skipped'
+                      ? `${escapeHtml(turnResult.player)} PASSOU A VEZ!`
+                      : `${escapeHtml(turnResult.player)} ERROU O PALPITE!`
+                  }
+                </h2>
+                
+                <div class="my-3 px-6 py-2.5 rounded-2xl bg-slate-800/90 border border-slate-700 text-center max-w-sm w-full">
+                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">A palavra secreta era:</span>
+                  <span class="text-xl md:text-2xl font-black text-cyan-300 tracking-wide">${escapeHtml(wordRevealed || "???")}</span>
+                </div>
+
+                ${turnResult?.outcome === 'correct' ? `
+                  <p class="text-xs font-black text-amber-300 m-0">+${turnResult.points || 100} pontos conquistados!</p>
+                ` : ''}
+
+                <div class="mt-4 flex items-center gap-1.5 text-xs text-slate-300 font-bold">
+                  <span class="animate-spin inline-block">⏳</span> Preparando o próximo jogador...
+                </div>
+              </div>
+            ` : isMyTurn ? `
+              <!-- VOCÊ É O JOGADOR DA VEZ (NÃO VÊ A SUA PRÓPRIA PALAVRA) -->
+              <div class="w-full flex flex-col items-center card-my-forehead p-5 rounded-3xl bg-gradient-to-b from-amber-500/20 to-slate-900/60 border-2 border-amber-400/60">
+                <div class="text-3xl md:text-4xl mb-1 animate-bounce">❓</div>
+                <span class="px-3 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-black uppercase tracking-wider mb-2 border border-amber-500/40">
                   SUA PALAVRA NA TESTA
                 </span>
-                <h2 class="text-2xl md:text-4xl font-black text-white m-0 tracking-wide">
-                  QUEM SOU EU?
-                </h2>
-                <p class="text-xs md:text-sm font-bold text-cyan-300 mt-2">
+                <h2 class="text-xl md:text-3xl font-black text-white m-0 tracking-wide">QUEM SOU EU?</h2>
+                <p class="text-xs font-bold text-cyan-300 mt-1">
                   🌟 Categoria: ${escapeHtml(myPlayer?.currentWord?.categoriaNome || "Geral")}
-                </p>
-                <p class="text-xs text-slate-300 mt-2 max-w-sm">
-                  Faça perguntas aos outros jogadores pelo chat para descobrir sua identidade antes que o tempo acabe!
                 </p>
               </div>
 
-              <!-- Botão para passar a vez se travar -->
-              <div class="mt-3 w-full flex justify-end">
-                <button id="btn-skip-turn" class="text-xs text-slate-400 hover:text-rose-400 font-bold px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 transition">
-                  ⏭️ Desistir / Passar a Vez
-                </button>
+              <!-- CONTROLE DO TURNO SEGUNDO A MÁQUINA DE ESTADOS -->
+              <div class="w-full mt-3">
+                ${turnPhase === "awaiting_question" ? `
+                  <!-- FASE 1: PERGUNTA OBRIGATÓRIA -->
+                  <div class="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-left">
+                    <span class="text-xs font-black text-amber-300 flex items-center gap-1">
+                      <span>❓</span> Passo 1 de 2: Formule sua pergunta
+                    </span>
+                    <p class="text-[11px] text-slate-300 mt-1 mb-2">
+                      Você pode fazer <strong>1 pergunta</strong> por turno para descobrir quem você é.
+                    </p>
+                    <form id="form-card-question" class="flex gap-2">
+                      <input
+                        type="text"
+                        id="input-card-question"
+                        maxlength="100"
+                        placeholder="Ex: Eu sou uma pessoa real? Eu sou homem?"
+                        class="glass-input flex-1 px-3 py-2 rounded-xl text-white text-xs font-medium focus:ring-1 focus:ring-amber-400"
+                      />
+                      <button
+                        type="submit"
+                        class="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 font-black text-slate-900 text-xs transition"
+                      >
+                        Perguntar ❓
+                      </button>
+                    </form>
+                  </div>
+                ` : turnPhase === "awaiting_responses" ? `
+                  <!-- FASE 2: AGUARDANDO RESPOSTAS DOS AMIGOS -->
+                  <div class="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-center animate-pulse">
+                    <span class="text-xs font-black text-amber-300 block mb-1">⏳ Passo 2: Aguardando respostas dos amigos...</span>
+                    <div class="p-2 my-1 rounded-xl bg-slate-900/80 border border-slate-700 text-xs text-white font-bold">
+                      "${escapeHtml(currentQuestion || "Sua pergunta")}"
+                    </div>
+                    <span class="text-[10px] text-slate-400 block mt-1">
+                      Assim que alguém responder SIM, NÃO ou TALVEZ, você poderá escolher entre palpitar ou passar!
+                    </span>
+                  </div>
+                ` : `
+                  <!-- FASE 3: ESCOLHA ENTRE PALPITE ÚNICO OU PASSAR A VEZ -->
+                  <div class="p-3 rounded-2xl bg-slate-800/80 border border-cyan-500/40 text-left">
+                    <div class="flex items-center justify-between mb-1.5">
+                      <span class="text-xs font-black text-cyan-300 flex items-center gap-1">
+                        <span>🎯</span> Passo 3: Escolha sua ação!
+                      </span>
+                      <span class="text-[10px] font-bold text-amber-400">1 tentativa</span>
+                    </div>
+
+                    <form id="form-card-guess" class="flex gap-2 mb-2">
+                      <input
+                        type="text"
+                        id="input-card-guess"
+                        maxlength="40"
+                        placeholder="Digite o nome exato de quem você é..."
+                        class="glass-input flex-1 px-3 py-2 rounded-xl text-white text-xs font-bold focus:ring-1 focus:ring-cyan-400"
+                      />
+                      <button
+                        type="submit"
+                        id="btn-confirm-guess"
+                        class="px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-400 to-teal-400 hover:from-cyan-300 text-slate-900 font-black text-xs transition active:scale-95 shadow-md shadow-cyan-500/20"
+                      >
+                        Palpitar 🎯
+                      </button>
+                    </form>
+
+                    <div class="flex items-center justify-between pt-2 border-t border-slate-700/60">
+                      <span class="text-[10px] text-rose-300 font-semibold">⚠️ Errou? A vez passa na hora!</span>
+                      <button
+                        type="button"
+                        id="btn-action-skip"
+                        class="px-3 py-1.5 rounded-xl bg-slate-700/80 hover:bg-slate-700 text-slate-200 text-xs font-bold transition active:scale-95"
+                      >
+                        Passar a Vez ⏭️
+                      </button>
+                    </div>
+                  </div>
+                `}
               </div>
             ` : `
               <!-- OUTRO JOGADOR É A VEZ: VOCÊ VÊ A PALAVRA DELE NA TESTA! -->
-              <div class="w-full flex flex-col items-center p-6 rounded-3xl bg-gradient-to-b from-cyan-500/20 to-slate-900/60 border-2 border-cyan-400/50">
-                <div class="text-3xl md:text-4xl mb-1">${escapeHtml(activePlayer?.avatar || "👤")}</div>
-                <span class="text-xs font-bold text-slate-300 mb-1">
+              <div class="w-full flex flex-col items-center p-5 rounded-3xl bg-gradient-to-b from-cyan-500/20 to-slate-900/60 border-2 border-cyan-400/50">
+                <div class="text-3xl mb-1">${escapeHtml(activePlayer?.avatar || "👤")}</div>
+                <span class="text-xs font-bold text-slate-300 mb-0.5">
                   É a vez de <strong class="text-cyan-300 font-black">${escapeHtml(activePlayer?.name || "Jogador")}</strong>
                 </span>
-                <span class="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-3">
+                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">
                   Categoria: ${escapeHtml(activePlayer?.currentWord?.categoriaNome || "Geral")}
                 </span>
 
                 <!-- PALAVRA REVELADA NA TESTA DELE -->
-                <div class="bg-white/95 text-slate-900 px-6 py-4 rounded-2xl shadow-2xl w-full max-w-md transform hover:scale-102 transition">
-                  <span class="block text-[10px] font-black uppercase text-slate-500 tracking-wider">A Palavra Secreta dele(a) é:</span>
-                  <h2 class="text-2xl md:text-3xl font-black m-0 text-slate-900 tracking-tight break-words">
+                <div class="bg-white/95 text-slate-900 px-5 py-3 rounded-2xl shadow-xl w-full max-w-md">
+                  <span class="block text-[9px] font-black uppercase text-slate-500 tracking-wider">A Palavra Secreta dele(a) é:</span>
+                  <h2 class="text-xl md:text-2xl font-black m-0 text-slate-900 tracking-tight break-words">
                     ${escapeHtml(activePlayer?.currentWord?.palavra || "Sorteando...")}
                   </h2>
                 </div>
-
-                <p class="text-xs text-slate-300 mt-3 max-w-sm">
-                  Responda às perguntas dele(a) no chat dizendo apenas SIM ou NÃO! Não dê spoilers diretos!
-                </p>
               </div>
 
-              <!-- BOTÕES DE RESPOSTA RÁPIDA (1 TOQUE NO CELULAR OU PC) -->
-              <div class="w-full mt-3 grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  data-quick-reaction="yes"
-                  class="py-3 px-2 rounded-2xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 font-black text-xs md:text-sm active:scale-95 transition flex items-center justify-center gap-1 shadow-md shadow-emerald-950/40"
-                >
-                  👍 SIM
-                </button>
-                <button
-                  type="button"
-                  data-quick-reaction="no"
-                  class="py-3 px-2 rounded-2xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 font-black text-xs md:text-sm active:scale-95 transition flex items-center justify-center gap-1 shadow-md shadow-rose-950/40"
-                >
-                  👎 NÃO
-                </button>
-                <button
-                  type="button"
-                  data-quick-reaction="maybe"
-                  class="py-3 px-2 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-black text-xs md:text-sm active:scale-95 transition flex items-center justify-center gap-1 shadow-md shadow-amber-950/40"
-                >
-                  🤔 TALVEZ
-                </button>
+              <!-- ÁREA DE RESPOSTAS RÁPIDAS PARA ESPECTADORES -->
+              <div class="w-full mt-2.5">
+                ${turnPhase === "awaiting_question" ? `
+                  <div class="p-2 rounded-xl bg-slate-800/60 border border-slate-700 text-center">
+                    <span class="text-xs text-slate-400 font-bold">
+                      ⏳ Aguardando ${escapeHtml(activePlayer?.name || "Jogador")} fazer a pergunta da vez...
+                    </span>
+                  </div>
+                ` : turnPhase === "awaiting_responses" ? `
+                  <div class="p-2.5 rounded-2xl bg-cyan-950/40 border border-cyan-400/40 mb-2 text-left">
+                    <span class="text-[11px] font-black text-cyan-300 block">
+                      ❓ Pergunta de ${escapeHtml(activePlayer?.name || "Jogador")}:
+                    </span>
+                    <p class="text-xs font-bold text-white m-0 mt-0.5">"${escapeHtml(currentQuestion || "")}"</p>
+                  </div>
+                ` : `
+                  <div class="p-2 rounded-xl bg-slate-800/60 border border-slate-700 text-center mb-2">
+                    <span class="text-xs text-cyan-300 font-bold">
+                      🎯 ${escapeHtml(activePlayer?.name || "Jogador")} está escolhendo entre palpitar ou passar!
+                    </span>
+                  </div>
+                `}
+
+                <!-- BOTÕES DE RESPOSTA RÁPIDA (1 TOQUE, ZERO SONS INCÔMODOS) -->
+                <div class="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    data-quick-reaction="yes"
+                    class="py-2.5 px-2 rounded-2xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 font-black text-xs md:text-sm active:scale-95 transition flex items-center justify-center gap-1 shadow-md shadow-emerald-950/40"
+                  >
+                    👍 SIM
+                  </button>
+                  <button
+                    type="button"
+                    data-quick-reaction="no"
+                    class="py-2.5 px-2 rounded-2xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 font-black text-xs md:text-sm active:scale-95 transition flex items-center justify-center gap-1 shadow-md shadow-rose-950/40"
+                  >
+                    👎 NÃO
+                  </button>
+                  <button
+                    type="button"
+                    data-quick-reaction="maybe"
+                    class="py-2.5 px-2 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-black text-xs md:text-sm active:scale-95 transition flex items-center justify-center gap-1 shadow-md shadow-amber-950/40"
+                  >
+                    🤔 TALVEZ
+                  </button>
+                </div>
               </div>
             `}
           </div>
         </div>
 
-        <!-- Coluna Direita: O CHAT DE PALPITES ESTILO GARTIC -->
-        <div class="lg:col-span-4 glass-panel p-3.5 rounded-3xl flex flex-col h-[400px] lg:h-full overflow-hidden">
-          <div class="flex items-center justify-between pb-2 mb-2 border-b border-slate-700/50">
+        <!-- Coluna Direita: O CHAT COM ROLAGEM INTERNA CONTIDA -->
+        <div class="lg:col-span-4 glass-panel p-3 rounded-3xl flex flex-col h-[340px] lg:h-full min-h-0 overflow-hidden flex-shrink-0">
+          <div class="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-700/50 flex-shrink-0">
             <h3 class="text-xs font-black uppercase text-slate-300 tracking-wider m-0 flex items-center gap-1.5">
-              <span>💬</span> Chat & Palpites
+              <span>💬</span> Chat da Sala
             </h3>
-            <span class="text-[10px] text-cyan-400 font-bold">Validação Automática ⚡</span>
+            <span class="text-[10px] text-cyan-400 font-bold">1 Pergunta • 1 Palpite</span>
           </div>
 
-          <!-- Feed de Mensagens com Rolagem Automática -->
-          <div id="chat-messages-container" class="flex-1 overflow-y-auto space-y-1.5 pr-1">
-            <!-- Mensagens são adicionadas dinamicamente aqui -->
+          <!-- Feed de Mensagens com Rolagem Interna Inteligente (Não expande a página) -->
+          <div id="chat-messages-container" class="flex-1 min-h-0 overflow-y-auto space-y-1 pr-1 overscroll-contain scrollbar-thin">
+            <!-- Mensagens renderizadas dinamicamente -->
           </div>
 
-          <!-- Caixa de Entrada de Texto -->
-          <form id="chat-form" class="mt-2 flex gap-1.5" onsubmit="return false;">
+          <!-- Caixa de Entrada de Texto do Chat -->
+          <form id="chat-form" class="mt-2 flex gap-1.5 flex-shrink-0" onsubmit="return false;">
             <input
               type="text"
               id="chat-input"
               maxlength="100"
               autocomplete="off"
-              placeholder="${isMyTurn ? 'Digite sua pergunta ou palpite...' : 'Envie uma dica ou converse...'}"
-              class="glass-input flex-1 px-3 py-2.5 rounded-xl text-white text-sm font-medium focus:ring-1 focus:ring-cyan-400"
+              placeholder="${chatPlaceholder}"
+              class="glass-input flex-1 px-3 py-2 rounded-xl text-white text-xs font-medium focus:ring-1 focus:ring-cyan-400"
             />
             <button
               type="submit"
               id="btn-send-chat"
-              class="px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-900 font-black text-sm active:scale-95 transition flex items-center justify-center shadow-md shadow-cyan-500/20"
+              class="px-3.5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-900 font-black text-xs active:scale-95 transition flex items-center justify-center shadow-md shadow-cyan-500/20 flex-shrink-0"
             >
-              ${isMyTurn ? "Palpitar 🎯" : "Enviar 💬"}
+              Enviar 💬
             </button>
           </form>
         </div>
@@ -819,11 +1012,11 @@ function renderGame(container) {
     </div>
   `;
 
-  bindGameEvents(isMyTurn);
+  bindGameEvents(isMyTurn, turnPhase);
   populateInitialChat();
 }
 
-function bindGameEvents(isMyTurn) {
+function bindGameEvents(isMyTurn, turnPhase) {
   // Sair do jogo
   document.getElementById("btn-leave-game")?.addEventListener("click", () => {
     if (confirm("Deseja realmente sair da partida?")) {
@@ -839,21 +1032,47 @@ function bindGameEvents(isMyTurn) {
     renderCurrentScreen();
   });
 
-  // Passar a vez
-  document.getElementById("btn-skip-turn")?.addEventListener("click", () => {
-    if (confirm("Tem certeza que deseja passar a sua vez?")) {
-      state.socket.emit("skip_turn", { code: state.roomCode });
-    }
-  });
+  // Ações do Jogador Ativo no Cartão Central:
+  if (isMyTurn) {
+    // 1. Enviar pergunta no formulário do cartão
+    const questionForm = document.getElementById("form-card-question");
+    questionForm?.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const input = document.getElementById("input-card-question");
+      const text = input?.value?.trim();
+      if (!text) return;
 
-  // Reações Rápidas (SIM, NÃO, TALVEZ)
+      sound.ensureContext();
+      state.socket.emit("chat_message", { code: state.roomCode, text });
+      input.value = "";
+    });
+
+    // 2. Enviar palpite único no formulário do cartão
+    const guessForm = document.getElementById("form-card-guess");
+    guessForm?.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const input = document.getElementById("input-card-guess");
+      const text = input?.value?.trim();
+      if (!text) return;
+
+      sendPlayerGuess(text);
+      input.value = "";
+    });
+
+    // 3. Passar a vez diretamente (sem modal intrusivo)
+    document.getElementById("btn-action-skip")?.addEventListener("click", () => {
+      state.socket.emit("skip_turn", { code: state.roomCode });
+    });
+  }
+
+  // Reações Rápidas (SIM, NÃO, TALVEZ) para espectadores
   document.querySelectorAll("[data-quick-reaction]").forEach((btn) => {
     btn.addEventListener("click", () => {
       sendQuickReaction(btn.dataset.quickReaction);
     });
   });
 
-  // Envio de Mensagem / Palpite no Chat
+  // Envio pelo formulário do chat
   const chatForm = document.getElementById("chat-form");
   chatForm?.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -863,59 +1082,11 @@ function bindGameEvents(isMyTurn) {
 
 function populateInitialChat() {
   const container = document.getElementById("chat-messages-container");
-  if (!container || !state.room?.chatMessages) return;
+  if (!container || !state.chatMessages) return;
 
   container.innerHTML = "";
-  // Renderiza histórico
   state.chatMessages.forEach((msg) => {
-    const isMe = msg.senderId === state.myId;
-    const msgEl = document.createElement("div");
-
-    if (msg.type === "system") {
-      let bgStyle = "bg-slate-800/80 border-slate-700 text-slate-300";
-      if (msg.subtype === "correct_guess") {
-        bgStyle = "bg-amber-500/20 border-amber-500/50 text-amber-300 font-bold shadow-lg shadow-amber-500/10";
-      } else if (msg.subtype === "timeout" || msg.subtype === "skip") {
-        bgStyle = "bg-rose-500/20 border-rose-500/40 text-rose-300 font-medium";
-      } else if (msg.subtype === "round_end" || msg.subtype === "game_over") {
-        bgStyle = "bg-cyan-500/20 border-cyan-500/40 text-cyan-200 font-bold";
-      }
-      msgEl.className = `p-2.5 my-1 rounded-xl text-xs md:text-sm text-center border ${bgStyle}`;
-      msgEl.innerHTML = `<span>${escapeHtml(msg.text)}</span>`;
-    } else if (msg.type === "quick_reaction") {
-      let colorClass = "bg-emerald-500/20 text-emerald-400 border-emerald-500/40";
-      if (msg.reactionType === "no") colorClass = "bg-rose-500/20 text-rose-400 border-rose-500/40";
-      if (msg.reactionType === "maybe") colorClass = "bg-amber-500/20 text-amber-400 border-amber-500/40";
-
-      msgEl.className = `flex items-center gap-2 p-2 my-1 rounded-xl text-sm border ${colorClass} ${isMe ? 'ml-auto max-w-[85%]' : 'mr-auto max-w-[85%]'}`;
-      msgEl.innerHTML = `
-        <span class="text-base">${escapeHtml(msg.avatar || "👤")}</span>
-        <div class="flex flex-col">
-          <span class="text-[10px] text-slate-400 font-bold">${escapeHtml(msg.senderName)}</span>
-          <span class="font-black text-sm tracking-wide">${escapeHtml(msg.text)}</span>
-        </div>
-      `;
-    } else if (msg.type === "guess") {
-      msgEl.className = `flex flex-col p-2.5 my-1.5 rounded-xl border border-cyan-500/40 bg-cyan-950/40 ${isMe ? 'ml-auto max-w-[90%]' : 'mr-auto max-w-[90%]'}`;
-      msgEl.innerHTML = `
-        <div class="flex items-center gap-1.5 mb-0.5">
-          <span>${escapeHtml(msg.avatar || "🎯")}</span>
-          <span class="text-xs font-black text-cyan-300">${escapeHtml(msg.senderName)} (Palpite)</span>
-        </div>
-        <p class="text-sm font-semibold text-white break-words m-0">${escapeHtml(msg.text)}</p>
-      `;
-    } else {
-      msgEl.className = `flex flex-col p-2 my-1 rounded-xl bg-slate-800/60 border border-slate-700/50 ${isMe ? 'ml-auto max-w-[85%]' : 'mr-auto max-w-[85%]'}`;
-      msgEl.innerHTML = `
-        <div class="flex items-center gap-1.5 mb-0.5">
-          <span class="text-xs">${escapeHtml(msg.avatar || "👤")}</span>
-          <span class="text-[11px] font-bold ${isMe ? 'text-cyan-400' : 'text-slate-400'}">${escapeHtml(msg.senderName)}</span>
-        </div>
-        <p class="text-sm text-slate-200 break-words m-0">${escapeHtml(msg.text)}</p>
-      `;
-    }
-
-    container.appendChild(msgEl);
+    container.appendChild(renderMessageElement(msg));
   });
   container.scrollTop = container.scrollHeight;
 }

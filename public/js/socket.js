@@ -36,6 +36,7 @@ export function initSocket() {
   // Atualização geral de estado da sala
   socket.on("room_state_update", (roomData) => {
     const previousState = state.room?.state;
+    const previousActiveId = state.room?.activePlayerId;
     state.room = roomData;
     state.roomCode = roomData.code;
 
@@ -49,7 +50,12 @@ export function initSocket() {
       }
     } else if (roomData.state === "playing" || roomData.state === "turn_celebration") {
       state.currentScreen = "game";
-      if (previousState === "lobby" || previousState === "word_suggestion" || previousState === "turn_celebration") {
+      // Som de troca de turno suave apenas quando o jogador ativo muda
+      if (
+        previousState === "lobby" ||
+        previousState === "word_suggestion" ||
+        (previousActiveId && previousActiveId !== roomData.activePlayerId && roomData.state === "playing")
+      ) {
         sound.playTurnChange();
       }
     } else if (roomData.state === "game_over") {
@@ -61,7 +67,7 @@ export function initSocket() {
     renderCurrentScreen();
   });
 
-  // Tick do temporizador em tempo real (60 FPS / 1s suave)
+  // Tick do temporizador em tempo real
   socket.on("timer_tick", (data) => {
     updateTimerUI(data.secondsRemaining, data.totalSeconds);
     if (data.secondsRemaining <= 5 && data.secondsRemaining > 0) {
@@ -74,17 +80,19 @@ export function initSocket() {
     appendChatMessage(msg);
   });
 
-  // Feedback exclusivo para palpites próximos ou alertas
+  // Feedback exclusivo para alertas e validações de turno
   socket.on("guess_feedback", (feedback) => {
     showToast(feedback.message, feedback.type === "close" ? "warning" : "error");
   });
 
-  // Evento especial de comemoração de acerto
+  // Evento de resultado do palpite (acerto ou erro que encerra o turno)
   socket.on("guess_result", (result) => {
     if (result.correct) {
       sound.playSuccess();
       triggerConfetti();
       showToast(`🎉 ${result.guesserName} acertou "${result.word}"! (+${result.earnedPoints} pts)`, "success");
+    } else {
+      showToast(`❌ ${result.guesserName} errou o palpite! A palavra era "${result.word}".`, "error");
     }
   });
 
