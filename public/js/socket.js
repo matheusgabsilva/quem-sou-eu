@@ -1,4 +1,4 @@
-import { state } from "./state.js";
+import { state, safeStorage, getScreenForRoomState } from "./state.js";
 import { sound } from "./audio.js";
 import { renderCurrentScreen, updateTimerUI, showToast, triggerConfetti } from "./ui-render.js";
 import { appendChatMessage } from "./chat.js";
@@ -12,7 +12,7 @@ export function initSocket() {
 
   // URL do backend: usa a mesma origem ou URL configurada
   const urlParams = new URLSearchParams(window.location.search);
-  const customBackend = urlParams.get("backend") || localStorage.getItem("qse_backend_url");
+  const customBackend = urlParams.get("backend") || safeStorage.getItem("qse_backend_url");
   const backendUrl = customBackend || window.location.origin;
 
   const socket = io(backendUrl, {
@@ -41,15 +41,12 @@ export function initSocket() {
     state.roomCode = roomData.code;
 
     // Detecta mudança de tela com base no estado da sala
-    if (roomData.state === "lobby") {
-      state.currentScreen = "lobby";
-    } else if (roomData.state === "word_suggestion") {
-      state.currentScreen = "word_suggestion";
+    state.currentScreen = getScreenForRoomState(roomData.state);
+    if (roomData.state === "word_suggestion") {
       if (previousState !== "word_suggestion") {
         sound.playTurnChange();
       }
     } else if (roomData.state === "playing" || roomData.state === "turn_celebration") {
-      state.currentScreen = "game";
       // Som de troca de turno suave apenas quando o jogador ativo muda
       if (
         previousState === "lobby" ||
@@ -59,7 +56,6 @@ export function initSocket() {
         sound.playTurnChange();
       }
     } else if (roomData.state === "game_over") {
-      state.currentScreen = "podium";
       sound.playGameOver();
       triggerConfetti();
     }
@@ -85,14 +81,14 @@ export function initSocket() {
     showToast(feedback.message, feedback.type === "close" ? "warning" : "error");
   });
 
-  // Evento de resultado do palpite (acerto ou erro que encerra o turno)
+  // Evento de resultado do palpite (acerto ou erro que encerra a tentativa)
   socket.on("guess_result", (result) => {
     if (result.correct) {
       sound.playSuccess();
       triggerConfetti();
       showToast(`🎉 ${result.guesserName} acertou "${result.word}"! (+${result.earnedPoints} pts)`, "success");
     } else {
-      showToast(`❌ ${result.guesserName} errou o palpite! A palavra era "${result.word}".`, "error");
+      showToast(`❌ ${result.guesserName} errou o palpite e volta para o final da fila!`, "error");
     }
   });
 

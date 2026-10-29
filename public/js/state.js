@@ -1,3 +1,30 @@
+export const safeStorage = {
+  getItem: (key) => {
+    try {
+      return typeof localStorage !== "undefined" ? localStorage.getItem(key) : null;
+    } catch {
+      return null;
+    }
+  },
+  setItem: (key, value) => {
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(key, value);
+      }
+    } catch {
+      // Ignora em contextos com armazenamento restrito
+    }
+  }
+};
+
+// Mapeia o estado da sala no servidor para a tela correspondente na interface
+export function getScreenForRoomState(roomState) {
+  if (roomState === "word_suggestion") return "word_suggestion";
+  if (roomState === "playing" || roomState === "turn_celebration") return "game";
+  if (roomState === "game_over") return "podium";
+  return "lobby";
+}
+
 // Estado reativo da aplicação no cliente
 export const state = {
   socket: null,
@@ -5,8 +32,8 @@ export const state = {
   currentScreen: "home", // "home" | "lobby" | "game" | "podium"
   
   // Dados do Jogador Local
-  playerName: localStorage.getItem("qse_name") || "",
-  playerAvatar: localStorage.getItem("qse_avatar") || "🦊",
+  playerName: safeStorage.getItem("qse_name") || "",
+  playerAvatar: safeStorage.getItem("qse_avatar") || "🦊",
   
   // Rascunho local de sugestão de palavra (preservado em atualizações de estado)
   wordDraft: { word: "", category: "" },
@@ -22,7 +49,7 @@ export const state = {
   chatMessages: [],
   
   // Status de som
-  soundEnabled: localStorage.getItem("qse_sound") !== "false",
+  soundEnabled: safeStorage.getItem("qse_sound") !== "false",
   
   // Flag para avisos temporários
   activeFeedback: null
@@ -31,12 +58,12 @@ export const state = {
 export function saveLocalPlayer(name, avatar) {
   state.playerName = name;
   state.playerAvatar = avatar;
-  localStorage.setItem("qse_name", name);
-  localStorage.setItem("qse_avatar", avatar);
+  safeStorage.setItem("qse_name", name);
+  safeStorage.setItem("qse_avatar", avatar);
 }
 
 export function toggleSound() {
   state.soundEnabled = !state.soundEnabled;
-  localStorage.setItem("qse_sound", state.soundEnabled ? "true" : "false");
+  safeStorage.setItem("qse_sound", state.soundEnabled ? "true" : "false");
   return state.soundEnabled;
 }

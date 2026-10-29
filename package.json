@@ -1,12 +1,13 @@
 {
   "name": "quem-sou-eu",
   "version": "1.0.0",
-  "description": "Multiplayer em tempo real do jogo 'Quem Sou Eu?' online",
+  "description": "Multiplayer em tempo real do jogo 'Quem Sou?' online",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "test": "node test/queue-and-scoring.test.js"
   },
   "dependencies": {
     "qrcode": "^1.5.4",

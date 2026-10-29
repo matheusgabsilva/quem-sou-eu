@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bannerBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b0f19" />
+      <stop offset="50%" stop-color="#131c31" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+
+    <radialGradient id="glowCyan" cx="20%" cy="25%" r="45%">
+      <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.22" />
+      <stop offset="100%" stop-color="#06b6d4" stop-opacity="0" />
+    </radialGradient>
+
+    <radialGradient id="glowPink" cx="85%" cy="80%" r="45%">
+      <stop offset="0%" stop-color="#ec4899" stop-opacity="0.18" />
+      <stop offset="100%" stop-color="#ec4899" stop-opacity="0" />
+    </radialGradient>
+
+    <linearGradient id="bgGradient" x1="85%" y1="10%" x2="15%" y2="90%">
+      <stop offset="0%" stop-color="#5B4DF2" />
+      <stop offset="50%" stop-color="#4374E0" />
+      <stop offset="100%" stop-color="#3BA9DC" />
+    </linearGradient>
+
+    <linearGradient id="borderHighlight" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#8FA0FF" stop-opacity="0.75" />
+      <stop offset="30%" stop-color="#5B4DF2" stop-opacity="0.15" />
+      <stop offset="100%" stop-color="#2980B9" stop-opacity="0.35" />
+    </linearGradient>
+
+    <linearGradient id="questionGradient" x1="30%" y1="15%" x2="70%" y2="85%">
+      <stop offset="0%" stop-color="#FF758F" />
+      <stop offset="45%" stop-color="#FA4664" />
+      <stop offset="100%" stop-color="#D92643" />
+    </linearGradient>
+
+    <linearGradient id="questionHighlight" x1="25%" y1="0%" x2="65%" y2="100%">
+      <stop offset="0%" stop-color="#FFB3C1" stop-opacity="0.75" />
+      <stop offset="50%" stop-color="#FF758F" stop-opacity="0.2" />
+      <stop offset="100%" stop-color="#D92643" stop-opacity="0" />
+    </linearGradient>
+
+    <linearGradient id="accentPill" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#22d3ee" />
+      <stop offset="100%" stop-color="#2dd4bf" />
+    </linearGradient>
+
+    <filter id="cardShadow" x="-15%" y="-15%" width="130%" height="135%">
+      <feDropShadow dx="0" dy="10" stdDeviation="16" flood-color="#020617" flood-opacity="0.6" />
+    </filter>
+
+    <filter id="questionShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="-4" dy="8" stdDeviation="6" flood-color="#1A3673" flood-opacity="0.45" />
+    </filter>
+
+    <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2" />
+    </filter>
+  </defs>
+
+  <!-- Fundo do Banner -->
+  <rect width="1200" height="420" rx="28" fill="url(#bannerBg)" />
+  <rect width="1200" height="420" rx="28" fill="url(#glowCyan)" />
+  <rect width="1200" height="420" rx="28" fill="url(#glowPink)" />
+  <rect x="2" y="2" width="1196" height="416" rx="26" fill="none" stroke="#334155" stroke-opacity="0.55" stroke-width="2" />
+
+  <!-- Logo Oficial 3D à Esquerda -->
+  <g transform="translate(88, 66) scale(0.56)">
+    <rect x="38" y="38" width="436" height="436" rx="114" ry="114" fill="url(#bgGradient)" stroke="url(#borderHighlight)" stroke-width="4" filter="url(#cardShadow)" />
+    <g filter="url(#questionShadow)">
+      <path d="M 212 214 C 212 182, 232 166, 258 166 C 286 166, 306 184, 306 210 C 306 234, 288 244, 271 255 C 259 263, 255 273, 255 292" fill="none" stroke="url(#questionGradient)" stroke-width="38" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M 208 210 C 208 180, 230 162, 256 162 C 282 162, 300 178, 300 204 C 300 226, 283 236, 267 247 C 255 255, 251 265, 251 284" fill="none" stroke="url(#questionHighlight)" stroke-width="10" stroke-linecap="round" filter="url(#softGlow)" />
+      <circle cx="255" cy="346" r="19" fill="url(#questionGradient)" />
+      <ellipse cx="251" cy="341" rx="9" ry="6" fill="#FFB3C1" fill-opacity="0.55" filter="url(#softGlow)" />
+    </g>
+  </g>
+
+  <!-- Tipografia e Destaques à Direita -->
+  <g transform="translate(415, 118)">
+    <!-- Badge Superior -->
+    <rect x="0" y="0" width="258" height="32" rx="16" fill="#06b6d4" fill-opacity="0.15" stroke="#22d3ee" stroke-opacity="0.4" />
+    <text x="129" y="21" text-anchor="middle" fill="#67e8f9" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="800" letter-spacing="1.2">MULTIPLAYER EM TEMPO REAL</text>
+
+    <!-- Título Principal -->
+    <text x="0" y="96" fill="#ffffff" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="68" font-weight="900" letter-spacing="-1">QUEM SOU?</text>
+
+    <!-- Subtítulo -->
+    <text x="0" y="136" fill="#94a3b8" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="600">O clássico jogo da palavra na testa para jogar com amigos no celular ou PC</text>
+
+    <!-- Pills de Recursos -->
+    <g transform="translate(0, 168)">
+      <rect x="0" y="0" width="180" height="40" rx="12" fill="#1e293b" stroke="#334155" />
+      <text x="90" y="25" text-anchor="middle" fill="#e2e8f0" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="700">Salas &amp; QR Code</text>
+
+      <rect x="194" y="0" width="196" height="40" rx="12" fill="#1e293b" stroke="#334155" />
+      <text x="292" y="25" text-anchor="middle" fill="#e2e8f0" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="700">1 Pergunta • 1 Palpite</text>
+
+      <rect x="404" y="0" width="176" height="40" rx="12" fill="#1e293b" stroke="#334155" />
+      <text x="492" y="25" text-anchor="middle" fill="#e2e8f0" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="700">100% em Português</text>
+
+      <rect x="594" y="0" width="160" height="40" rx="12" fill="url(#accentPill)" />
+      <text x="674" y="25" text-anchor="middle" fill="#0f172a" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="900">quemsou.online</text>
+    </g>
+  </g>
+</svg>

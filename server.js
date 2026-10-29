@@ -138,7 +138,7 @@ setupSocketHandlers(io);
 
 server.listen(port, "0.0.0.0", () => {
   console.log(`\n======================================================`);
-  console.log(`  🎉 QUEM SOU EU? - Multiplayer em Tempo Real`);
+  console.log(`  🎉 QUEM SOU? - Multiplayer em Tempo Real`);
   console.log(`======================================================`);
   console.log(`💻 Acesso Local (PC): http://localhost:${port}`);
   const ips = localAddresses();

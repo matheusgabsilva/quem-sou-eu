@@ -1,96 +1,143 @@
 # Melhorias e feedbacks do jogo
 
-Documento de referência para orientar as próximas alterações do projeto pelo Antigravity. Consolida os comentários dos jogadores, as observações do proprietário e o fluxo identificado no código atual. Este documento registra requisitos; não altera o comportamento do jogo.
+Documento de requisitos para as próximas alterações pelo Antigravity. Consolida os feedbacks dos jogadores, as decisões do proprietário e o comportamento atual identificado no código. Este arquivo descreve requisitos; não altera o código.
 
-## 1. Contexto atual confirmado no código
+## 1. Comportamento atual relevante
 
-- O servidor escolhe um jogador ativo por vez (`activePlayerId`); os participantes não tentam adivinhar simultaneamente.
-- Na vez de uma pessoa, ela vê `???` no próprio cartão. Os demais veem a palavra dela e podem responder pelo chat e pelos botões SIM, NÃO ou TALVEZ.
-- Hoje o jogador ativo pode enviar várias mensagens/palpites durante o turno. Um acerto encerra o turno; passar a vez ou o cronômetro expirar também encerra o turno.
-- Após acerto, passagem ou tempo esgotado, há uma tela/estado de celebração e uma espera aproximada de 3,5 a 4 segundos antes do próximo turno.
-- A rodada só termina quando todos os jogadores da lista atual tiveram seu turno. Se houver rodadas configuradas, inicia uma nova fase de sugestão de palavras. O pódio aparece após a última rodada.
-- O padrão é 60 segundos por turno e 3 rodadas. O host pode configurar categorias, tempo e número de rodadas.
-- As atualizações da sala acionam a renderização da tela inteira no cliente. Na fase de sugestão, isso pode recriar o formulário e apagar o que os outros jogadores ainda estavam digitando.
-- O backend atribui avatares por conta própria ao criar/entrar em uma sala. O avatar escolhido pelo usuário na tela inicial não é enviado nos eventos de criação/entrada, portanto a seleção não é preservada de forma confiável.
-- O chat recebe novas mensagens e rola até o final. Seu feed usa rolagem interna, mas o layout precisa ser verificado para impedir que mensagens façam a página inteira crescer ou escondam controles em telas menores.
-- As respostas rápidas são mensagens visíveis a todos; atualmente o servidor não registra que a pessoa da vez já fez sua pergunta nem limita a quantidade de palpites do jogador ativo.
+- O servidor controla um jogador ativo por vez. Os outros jogadores veem a palavra dele e podem responder pelo chat ou por SIM, NÃO e TALVEZ.
+- A implementação atual limita o jogador ativo a uma pergunta e um palpite por turno. A primeira resposta de outro jogador libera a decisão de palpitar ou passar; os demais ainda conseguem responder depois disso.
+- Hoje um palpite errado encerra a vez. Quando todos os participantes tiveram uma primeira vez, a rodada avança, mesmo que haja palavras que ninguém acertou. Esse comportamento precisa mudar conforme a fila definida abaixo.
+- Hoje o acerto vale `100 + round(100 * tempoRestante / tempoConfigurado)`. Errar, passar ou deixar o tempo acabar não reduz pontos.
+- O jogo permite configurar 45, 60, 90 ou 120 segundos por turno e a quantidade de rodadas. A nova regra de bônus definida abaixo usa como referência fixa 60 segundos; consulte a regra de limite para partidas com tempos diferentes.
+- Há mensagens de sistema no chat sobre envio de palavra, início de fase/rodada, distribuição de palavras e troca de vez. O feedback mais recente pede remover mensagens repetitivas de preparação e deixar o chat mais limpo.
+- O layout do jogo usa três colunas. Na versão atual, o placar ocupa 3/12, o palco 5/12 e o chat 4/12; em telas estreitas, as áreas são empilhadas e a página pode rolar.
 
-## 2. Regra desejada para o turno — alinhamento principal
+## 2. Regra de turnos e fila de palavras não resolvidas
 
-Cada participante deve ter sua vez em sequência. Durante o turno, o jogador ativo pode:
+Cada palavra é distribuída uma vez no começo da rodada e permanece com o mesmo jogador até ser acertada. Não redistribuir palavras após erro, passagem ou timeout.
 
-1. Fazer **exatamente uma pergunta** no chat.
-2. Aguardar a resposta dos demais, que podem responder SIM, NÃO ou TALVEZ. A escolha da resposta continua livre para cada participante; não há votação obrigatória nem resposta de uma pessoa específica.
-3. Depois de receber a resposta, escolher entre:
-   - enviar **um único palpite**; ou
-   - passar a vez sem palpitar.
-4. Se o palpite estiver correto, o turno termina e a vez passa ao próximo jogador.
-5. Se o palpite estiver errado, essa tentativa é consumida e o turno termina imediatamente; a vez passa ao próximo jogador.
-6. Se decidir não palpitar, pode passar a vez diretamente.
-7. O tempo configurado continua sendo o limite máximo do turno. Se expirar em qualquer etapa, o turno termina e passa ao próximo jogador.
+### Fluxo de uma tentativa
 
-Não adicionar uma tela/modal de confirmação para iniciar o palpite. A decisão deve ser apresentada como ações claras após a pergunta/respostas. A pergunta é obrigatória para avançar normalmente ao palpite ou à passagem; exceções por timeout permanecem automáticas.
+1. O jogador elegível no início da fila faz exatamente uma pergunta.
+2. A primeira resposta de outro participante — por mensagem no chat ou por SIM/NÃO/TALVEZ — libera a decisão do jogador ativo. Os demais participantes ainda podem responder normalmente enquanto essa pessoa decide e até o turno terminar.
+3. O jogador ativo pode enviar um único palpite ou passar sem palpitar. Não mostrar modal de confirmação.
+4. Um palpite errado termina a tentativa atual. Passar também termina a tentativa. Timeout termina a tentativa automaticamente.
+5. Erro, passagem ou timeout colocam o jogador no final da fila de palavras não resolvidas, preservando a ordem original entre os jogadores que ainda precisam adivinhar. A pessoa poderá tentar novamente mais tarde com a mesma palavra.
+6. Acerto remove o jogador da fila de adivinhação. Ele continua na sala e pode responder SIM/NÃO/TALVEZ às perguntas dos demais, mas não recebe outro turno de palpite nessa rodada.
+7. A rodada só termina quando todos os jogadores da fila acertaram suas palavras. Não encerrar a rodada apenas porque cada pessoa teve uma primeira tentativa ou porque o último da fila errou/passou.
+8. Quando a fila ficar vazia, seguir para a fase de preparação da próxima rodada, se houver; depois da última rodada, mostrar o pódio.
 
-A rodada continua até que todos os participantes tenham tido seu turno. O jogo continua respeitando o número de rodadas configurado; não termina simplesmente porque alguém acertou. Tornar visualmente evidente quem está jogando, quando aguarda respostas e para quem a vez passou.
+### Ordem da fila
 
-## 3. Feedbacks recebidos de quem jogou
+- Inicializar a fila pela ordem original dos participantes da rodada.
+- Em cada tentativa, processar a pessoa no início da fila.
+- Se ela errar, passar ou esgotar o tempo, removê-la temporariamente do início e colocá-la no final, sem alterar sua palavra.
+- Se acertar, removê-la definitivamente da fila daquela rodada.
+- Participantes que já acertaram continuam habilitados como respondentes.
+- Mudanças na lista de participantes por entrada, saída ou desconexão não podem duplicar, pular ou reatribuir palavras. Definir tratamento seguro para desconexão do jogador ativo e registrar a decisão na entrega.
 
-### 3.1 Chat e layout
+## 3. Pontuação — regra acordada
 
-- Com muitas mensagens, o chat cresce e desloca a página para baixo. Manter o histórico rolando dentro da caixa do chat, sem expandir a página inteira.
-- Garantir que o campo de texto e os botões de resposta rápida permaneçam acessíveis enquanto o histórico rola, especialmente em telas menores.
+A pontuação de cada acerto soma dois componentes independentes: uma base que cai conforme o número global da tentativa na rodada e um bônus de tempo que depende do relógio.
 
-### 3.2 Ritmo e clareza de turnos
+### Pontuação base por tentativa na rodada
 
-- A troca entre participantes parece rápida e deixa dúvida se a partida ainda está valendo.
-- Mostrar uma transição/indicador visual entre turnos, informando de forma clara que a vez mudou e quem joga agora. A experiência deve deixar explícito que o próximo jogador tem sua oportunidade.
-- Considerar o tempo de celebração/transição atual (cerca de 3,5–4 s) ao ajustar a indicação visual; não reduzir o tempo sem necessidade.
+Fórmula:
 
-### 3.3 Último jogador
+```js
+base = Math.max(0, 110 - (turnoAtual * 10))
+```
 
-- Foi relatado que, quando alguém acerta, o jogo acaba e a última pessoa às vezes não chega a jogar.
-- A leitura do código indica que, em condições normais, o acerto encerra somente o turno atual e a rodada só avança após todos jogarem. Conferir a nova regra de uma pergunta/um palpite para garantir que o último participante também sempre receba sua vez e que a partida não finalize antes disso.
+`turnoAtual` começa em 1 para a primeira tentativa da fila da rodada e aumenta em uma unidade a cada tentativa concluída, independentemente de quem a realizou. A base é 100 no turno 1, 90 no turno 2, 80 no turno 3 e segue caindo 10 pontos por turno até zero no turno 11 e seguintes. Ao iniciar uma nova rodada, o contador reinicia em 1.
 
-## 4. Observações do proprietário
+### Bônus por tempo
 
-### 4.1 Rascunho da sugestão de palavra
+Fórmula alinhada:
 
-- Na tela “Escreva uma Palavra Secreta”, se outra pessoa enviar a própria palavra enquanto alguém ainda está preenchendo a sua, o formulário da pessoa que ainda digita é limpo.
-- Preservar localmente os campos de palavra e dica/categoria durante atualizações de progresso da sala. O envio de um participante não pode apagar o rascunho dos demais.
+```js
+bonus = Math.round(100 * (tempoRestante / 60))
+```
 
-### 4.2 Avatar
+- O bônus máximo de referência é 100 pontos e depende apenas do tempo restante, não do número do turno.
+- O tempo usado no cálculo não pode ser menor que zero nem maior que 60 segundos. Isso mantém o bônus dentro de 0–100 mesmo quando o lobby estiver configurado para 90 ou 120 segundos.
+- Com tempo configurado em 45 segundos, o bônus máximo no início do turno é 75 pontos pela referência fixa de 60 segundos definida acima.
+- Não substituir o divisor fixo `60` pelo tempo configurado sem autorização. Deixar explícito no código/entrega que o divisor é fixo.
 
-- A escolha de avatar na tela inicial não está sendo respeitada ao entrar/criar sala.
-- Enviar e preservar o avatar escolhido pelo jogador no fluxo de criação e entrada, com validação no servidor e compatibilidade com avatares disponíveis.
+### Total concedido
 
-### 4.3 Sons
+```js
+total = base + bonus
+```
 
-- Os sons associados às respostas SIM e NÃO incomodam.
-- Rever os efeitos sonoros acionados por respostas rápidas e reduzir/remover os sons incômodos, sem remover inadvertidamente os sons de acerto, aviso de tempo ou transição que não foram apontados.
+Somar os pontos ao total acumulado do jogador somente quando ele acertar. Erro, passagem e timeout não concedem pontos. O placar ao vivo e o pódio continuam ordenados pelo total acumulado.
 
-## 5. Critérios de aceite sugeridos
+Exemplos:
 
-- Em uma sala com vários jogadores, ninguém consegue enviar uma segunda pergunta durante o mesmo turno.
-- A resposta SIM/NÃO/TALVEZ não consome o palpite; após a pergunta, o jogador pode fazer no máximo um palpite ou passar.
-- Um palpite errado encerra o turno imediatamente; um correto mantém a pontuação/celebração existente e também encerra o turno.
-- Passar sem palpitar encerra o turno; timeout também avança sem bloquear a partida.
-- Todos os jogadores na rodada, inclusive o último, recebem um turno antes de começar outra rodada ou mostrar o pódio.
-- Os controles e o indicador de estado tornam explícito se o jogador está formulando a pergunta, aguardando respostas, escolhendo palpite/passagem ou se é a vez de outra pessoa.
-- Atualizações de progresso da sugestão não removem os rascunhos locais de palavra e dica.
-- O avatar escolhido aparece corretamente na sala e no jogo.
-- O histórico do chat rola dentro do painel e não empurra a página nem esconde o campo de entrada/respostas rápidas em desktop e celular.
-- As respostas rápidas não reproduzem o efeito sonoro incômodo identificado.
+| Tentativa na rodada | Base | Tempo restante | Bônus | Total no acerto |
+|---:|---:|---:|---:|---:|
+| 1 | 100 | 60 s | 100 | 200 |
+| 2 | 90 | 45 s | 75 | 165 |
+| 3 | 80 | 30 s | 50 | 130 |
+| 4 | 70 | 15 s | 25 | 95 |
+| 10 | 10 | 60 s | 100 | 110 |
+| 11 ou posterior | 0 | 60 s | 100 | 100 |
 
-## 6. Áreas do projeto relacionadas
+## 4. Respostas e fase de palpite
 
-- `lib/game-manager.js`: ordem e estado dos turnos, tempo, validação de mensagens/palpites, pontuação e avanço de rodada.
-- `lib/socket-handler.js`: eventos Socket.IO e passagem de dados de criação/entrada.
-- `public/js/ui-render.js`: telas de preparação, jogo, controles, formulário e layout do chat.
-- `public/js/socket.js`: atualização/renderização do estado em tempo real.
-- `public/js/chat.js`: envio e apresentação das mensagens.
-- `public/js/audio.js`: efeitos sonoros sintetizados.
-- `public/css/style.css`: regras visuais/responsivas e contenção/rolagem do layout.
+- A pergunta é obrigatória para entrar na etapa de palpite/passagem, exceto quando o turno terminar por timeout ou saída/desconexão tratada pelo servidor.
+- A primeira resposta válida libera a tentativa do jogador ativo. Não exigir resposta de todos.
+- Depois da primeira resposta, manter os controles de resposta dos demais participantes ativos até o encerramento real do turno. Respostas adicionais não iniciam uma segunda tentativa nem alteram a fila.
+- Só o jogador ativo pode palpitar ou passar. Rejeitar no servidor ações fora de ordem, tentativas extras e eventos duplicados.
+- Jogadores que já acertaram a palavra da rodada continuam podendo responder, mas não podem voltar à fila de palpites nessa rodada.
 
-## 7. Nota para implementação
+## 5. Limpeza do chat e mensagens de sistema
 
-Validar a nova regra no servidor, não apenas desabilitando controles na interface. O estado do turno deve impedir mensagens/perguntas extras e palpites repetidos mesmo se o cliente enviar eventos fora da ordem. Preservar as salvaguardas atuais de sigilo da palavra, proteção anti-spoiler, pontuação e autorização do host. Cobrir casos de timeout, saída/desconexão, um jogador restante e mudanças no número de jogadores durante a rodada para evitar travamentos ou encerramento prematuro.
+- Remover avisos redundantes como “Fulano enviou sua palavra secreta”, contagens repetidas de submissão, “todas as palavras foram distribuídas” e narrativas de início de rodada/preparação. A tela e os controles já explicam essas fases.
+- Manter o aviso claro de **quem está na vez** e a indicação visual da fase atual.
+- Manter no histórico as perguntas reais e respostas dos jogadores, os palpites e mensagens essenciais de resultado (acerto/erro/palavra revelada) necessárias para acompanhar a partida.
+- Evitar repetir em uma mensagem de sistema uma pergunta que já aparece como mensagem do jogador.
+- Manter o feed contido dentro do painel: mensagens não podem aumentar a página inteira. O campo de envio e os botões SIM/NÃO/TALVEZ devem continuar acessíveis.
+- A rolagem automática deve acompanhar novas mensagens quando o usuário já está no fim do histórico, sem puxá-lo para baixo se estiver lendo mensagens anteriores.
+
+## 6. Redimensionamento do tabuleiro
+
+- Usar mais largura horizontal em desktop, reduzindo margens laterais excessivas sem comprometer telas pequenas.
+- Redistribuir as três áreas para dar mais largura ao chat e melhorar a leitura das mensagens. Como ponto inicial, avaliar placar 3/12, palco 4/12 e chat 5/12, ajustando com inspeção visual em resoluções comuns.
+- Preservar a hierarquia do cartão central e a leitura do placar; evitar que o chat ocupe espaço à custa de esconder as ações do turno.
+- Em telas menores, manter adaptação responsiva, rolagem interna do histórico e acesso evidente aos controles. Conferir o comportamento real em celular, não apenas em desktop.
+
+## 7. Melhorias anteriores já implementadas no commit atual
+
+O commit atual já inclui implementações para preservar o rascunho de palavra e dica durante atualizações de progresso, transmitir e validar o avatar escolhido, conter o histórico do chat e remover sons das respostas rápidas. Não desfazer essas melhorias ao alterar o fluxo.
+
+## 8. Feedbacks originais e critérios de aceite
+
+- O chat não cresce junto com as mensagens nem desloca a página; a leitura e o envio continuam acessíveis.
+- O tabuleiro usa melhor a largura de desktop e o painel do chat é mais largo.
+- O chat deixa de repetir mensagens de preparação/envio de palavra; o jogador consegue identificar quem está na vez.
+- Cada tentativa aceita uma pergunta e no máximo um palpite ou passagem.
+- Qualquer participante pode responder; a primeira resposta libera a decisão do ativo, e os demais ainda podem responder até o turno terminar.
+- Erro, passagem ou timeout mantêm a palavra com o mesmo jogador e o colocam no final da fila; a ordem dos demais elegíveis permanece estável.
+- Acerto remove a pessoa da fila de palpites, mas ela continua apta a responder às perguntas dos demais.
+- A rodada só avança quando todos acertaram suas palavras; o último jogador não provoca fim prematuro por errar.
+- A base e o bônus seguem as fórmulas deste documento, aplicadas no servidor. O placar e o pódio mostram os totais acumulados.
+- A seleção de avatar e os rascunhos na preparação continuam preservados; respostas rápidas não reproduzem os sons incômodos.
+- Cobrir timeout em cada fase, saída/desconexão, mudança de membros, último elegível da fila, repetição/concorrência de eventos, reinício e início da próxima rodada.
+
+## 9. Arquivos provavelmente envolvidos
+
+- `lib/game-manager.js`: fila de palavras não resolvidas, transições, contador de tentativa por rodada, timer e pontuação.
+- `lib/socket-handler.js`: validação e encaminhamento de eventos Socket.IO.
+- `public/js/ui-render.js`: estados do turno, respostas, layout das três colunas e mensagens visuais.
+- `public/js/socket.js`: sincronização e renderização dos estados.
+- `public/js/chat.js`: apresentação e rolagem do histórico.
+- `public/css/style.css`: dimensões, contenção e responsividade.
+
+## 10. Requisitos de implementação
+
+- Aplicar regras de fila e pontuação no servidor; não confiar apenas na interface.
+- Manter invariantes de sigilo da palavra, proteção anti-spoiler, autorização do host e pontuação por acerto.
+- Evitar avanços duplicados quando palpite, passagem, timeout ou desconexão ocorrerem quase ao mesmo tempo.
+- Garantir que quem acertou não volte à fila da rodada, mas siga presente para responder.
+- Não alterar a identidade visual sem necessidade; validar legibilidade e layout em desktop e mobile.
+- Ao entregar, resumir decisões de fluxo, arquivos alterados, validações executadas e limitações restantes.

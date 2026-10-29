@@ -123,6 +123,24 @@ export function renderMessageElement(msg) {
   return msgEl;
 }
 
+export const CHAT_SCROLL_THRESHOLD = 60;
+
+// Determina se a rolagem deve acompanhar automaticamente uma nova mensagem.
+// Retorna true se o container estava no fim (ou quase no fim até a margem de threshold)
+// ou se o conteúdo total cabe dentro da área visível.
+export function shouldFollowChatScroll(scrollTop, scrollHeight, clientHeight, threshold = CHAT_SCROLL_THRESHOLD) {
+  if (scrollHeight <= clientHeight) return true;
+  return (scrollHeight - clientHeight - scrollTop) <= threshold;
+}
+
+// Determina a posição de rolagem para restaurar o estado após reconstrução do DOM
+export function calculateRestoredScrollPosition({ wasAtBottom, previousScrollTop, newScrollHeight, clientHeight }) {
+  if (wasAtBottom || (typeof clientHeight === "number" && newScrollHeight <= clientHeight)) {
+    return newScrollHeight;
+  }
+  return Math.max(0, previousScrollTop || 0);
+}
+
 // Adiciona uma mensagem ao feed do chat na tela com rolagem interna inteligente
 export function appendChatMessage(msg) {
   state.chatMessages.push(msg);
@@ -130,13 +148,15 @@ export function appendChatMessage(msg) {
   if (!container) return;
 
   const isMe = msg.senderId === state.myId;
-  const isScrolledToBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + 60;
+  // Verifica se o leitor estava no final do chat ANTES de anexar o novo elemento
+  const wasAtBottom = shouldFollowChatScroll(container.scrollTop, container.scrollHeight, container.clientHeight);
 
   const msgEl = renderMessageElement(msg);
   container.appendChild(msgEl);
 
-  // Rola automaticamente para baixo apenas se já estava no fim ou se a mensagem é do próprio usuário/sistema
-  if (isScrolledToBottom || isMe || msg.type === "system" || msg.type === "question") {
+  // REQUISITO: Auto-scroll ocorre quando a pessoa enviou a mensagem (isMe)
+  // ou se já estava próxima do final. Se estiver lendo mensagens antigas, mantém a posição!
+  if (isMe || wasAtBottom) {
     container.scrollTop = container.scrollHeight;
   }
 }

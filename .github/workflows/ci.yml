@@ -24,6 +24,9 @@ jobs:
       - name: Instalar Dependências
         run: npm ci
 
+      - name: Executar Testes Automatizados
+        run: npm test
+
       - name: Validar Sintaxe dos Arquivos JavaScript
         run: |
           node --check server.js
@@ -31,6 +34,13 @@ jobs:
           node --check lib/socket-handler.js
           node --check lib/server-utils.js
           node --check lib/words.js
+          node --check public/js/chat.js
+          node --check public/js/ui-render.js
+          node --check public/js/socket.js
+          node --check public/js/state.js
+          node --check public/js/audio.js
+          node --check public/js/app.js
+          node --check test/queue-and-scoring.test.js
 
       - name: Testar Inicialização do Servidor
         run: |

@@ -1,6 +1,225 @@
-import { state, saveLocalPlayer, toggleSound } from "./state.js";
+import { state, saveLocalPlayer, toggleSound, safeStorage, getScreenForRoomState } from "./state.js";
 import { sound } from "./audio.js";
-import { escapeHtml, sendChatMessage, sendPlayerGuess, sendQuickReaction, renderMessageElement } from "./chat.js";
+import {
+  escapeHtml,
+  sendChatMessage,
+  sendPlayerGuess,
+  sendQuickReaction,
+  renderMessageElement,
+  shouldFollowChatScroll,
+  calculateRestoredScrollPosition
+} from "./chat.js";
+
+export const OFFICIAL_DOMAIN = "https://quemsou.online";
+
+// Identifica se um hostname pertence a loopback ou à rede privada local
+export function isPrivateOrLocalHost(hostname) {
+  if (!hostname) return false;
+  const host = String(hostname).trim().toLowerCase();
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]") {
+    return true;
+  }
+
+  // Validação estrita de endereços IPv4
+  const ipv4Parts = host.split(".");
+  if (ipv4Parts.length === 4 && ipv4Parts.every((p) => /^\d{1,3}$/.test(p) && Number(p) >= 0 && Number(p) <= 255)) {
+    const [o1, o2] = ipv4Parts.map(Number);
+    // 127.0.0.0/8
+    if (o1 === 127) return true;
+    // 10.0.0.0/8
+    if (o1 === 10) return true;
+    // 192.168.0.0/16
+    if (o1 === 192 && o2 === 168) return true;
+    // 172.16.0.0/12 (172.16.0.0 a 172.31.255.255)
+    if (o1 === 172 && o2 >= 16 && o2 <= 31) return true;
+    return false;
+  }
+
+  return false;
+}
+
+// Gera o link de compartilhamento preservando origens locais em desenvolvimento
+export function getShareUrl(roomCode) {
+  const code = encodeURIComponent((roomCode || "").toUpperCase());
+  if (typeof window !== "undefined" && window.location) {
+    const hostname = window.location.hostname || "";
+    if (isPrivateOrLocalHost(hostname)) {
+      return `${window.location.origin}/?room=${code}`;
+    }
+  }
+  return `${OFFICIAL_DOMAIN}/?room=${code}`;
+}
+
+// Proporção de colunas no layout desktop do tabuleiro (3/12 Placar, 4/12 Palco Central, 5/12 Chat)
+export const BOARD_LAYOUT_SPANS = {
+  scoreboard: 3,
+  centerStage: 4,
+  chat: 5
+};
+
+// 9 Regras oficiais do jogo exibidas no tutorial acessível
+export const TUTORIAL_RULES = [
+  "Cada participante recebe uma palavra secreta na testa que os demais conseguem ver, mas a própria pessoa não vê a sua palavra.",
+  "Na sua vez de jogar, a pessoa faz exatamente uma pergunta no chat para receber pistas dos outros jogadores.",
+  "Depois da primeira resposta válida, o jogador da vez pode escolher entre dar um palpite ou passar a vez.",
+  "É permitido apenas um único palpite por tentativa. Passar a vez também encerra a tentativa imediatamente.",
+  "As outras pessoas ainda podem responder enquanto o turno estiver aberto, inclusive depois que a primeira resposta liberou o palpite.",
+  "Se a pessoa errar o palpite, passar a vez ou o tempo acabar, ela volta ao fim da fila e mantém a mesma palavra secreta para tentar novamente.",
+  "Quem acertar sai da fila de palpites daquela rodada, mas continua podendo responder às perguntas dos outros.",
+  "A rodada só termina quando todos os participantes elegíveis acertarem ou saírem da fila por desconexão.",
+  "A pontuação do acerto combina a base da tentativa global da rodada com o bônus calculado pelo tempo restante (a base diminui a cada tentativa da rodada e o tempo restante afeta o bônus)."
+];
+
+let tutorialKeydownHandler = null;
+let tutorialOpenerElement = null;
+
+// Elementos focáveis do modal, na ordem do DOM (usados na contenção de foco com Tab / Shift+Tab)
+export const TUTORIAL_FOCUSABLE_IDS = ["btn-close-tutorial", "tutorial-modal-content", "btn-confirm-tutorial"];
+const TUTORIAL_CONTAINER_ID = "tutorial-modal-container";
+
+// Decide para qual elemento o foco deve ser movido para manter a navegação por teclado dentro do modal.
+// Retorna o id do destino ou null quando o comportamento natural do navegador já fica dentro do modal.
+export function getTutorialFocusTarget(activeId, shiftKey) {
+  const ids = TUTORIAL_FOCUSABLE_IDS;
+  const index = ids.indexOf(activeId);
+  if (shiftKey) {
+    // Shift+Tab no primeiro item (ou no próprio diálogo / fora dele) volta para o último
+    return index <= 0 ? ids[ids.length - 1] : null;
+  }
+  // Tab no último item (ou com o foco fora do modal) volta para o primeiro
+  if (index === ids.length - 1) return ids[0];
+  if (index === -1 && activeId !== TUTORIAL_CONTAINER_ID) return ids[0];
+  return null;
+}
+
+// Abre modal acessível de tutorial com as regras do jogo
+export function openTutorialModal(openerElement = null) {
+  if (typeof document === "undefined") return null;
+  if (document.getElementById("tutorial-modal-backdrop")) {
+    return document.getElementById("tutorial-modal-backdrop");
+  }
+
+  // Guarda o elemento que abriu o modal para devolver o foco ao fechar
+  // (Safari/Firefox no macOS não focam botões ao clicar, por isso o chamador informa o botão explicitamente)
+  tutorialOpenerElement = openerElement || document.activeElement || null;
+
+  const backdrop = document.createElement("div");
+  backdrop.id = "tutorial-modal-backdrop";
+  backdrop.setAttribute("role", "dialog");
+  backdrop.setAttribute("aria-modal", "true");
+  backdrop.setAttribute("aria-labelledby", "tutorial-modal-title");
+  backdrop.className = "fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 md:p-4 overscroll-contain animate-fade-in";
+
+  backdrop.innerHTML = `
+    <div
+      id="tutorial-modal-container"
+      class="glass-panel w-full max-w-lg max-h-[88vh] md:max-h-[82vh] flex flex-col rounded-3xl shadow-2xl border border-cyan-500/30 overflow-hidden relative focus:outline-none"
+      tabindex="-1"
+    >
+      <!-- Cabeçalho do Modal -->
+      <div class="flex items-center justify-between p-4 md:p-5 border-b border-slate-700/60 bg-slate-900/60 flex-shrink-0">
+        <div class="flex items-center gap-2.5">
+          <span class="w-8 h-8 rounded-xl bg-cyan-500/20 text-cyan-300 font-black text-lg flex items-center justify-center border border-cyan-500/40">?</span>
+          <div>
+            <h2 id="tutorial-modal-title" class="text-base md:text-lg font-black text-white m-0">Como Jogar Quem Sou?</h2>
+            <p class="text-[11px] text-slate-400 m-0">Guia rápido de regras e dinâmica da partida</p>
+          </div>
+        </div>
+        <button
+          id="btn-close-tutorial"
+          type="button"
+          aria-label="Fechar tutorial"
+          class="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-black text-sm flex items-center justify-center border border-slate-700 transition focus:outline-none focus:ring-2 focus:ring-cyan-400 cursor-pointer"
+        >
+          ✕
+        </button>
+      </div>
+
+      <!-- Conteúdo com Rolagem Interna -->
+      <div id="tutorial-modal-content" tabindex="0" aria-label="Lista de regras do jogo" class="p-4 md:p-5 overflow-y-auto space-y-2.5 scrollbar-thin text-slate-200 flex-1 min-h-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-inset">
+        <ol class="space-y-2.5 text-xs md:text-sm list-none p-0 m-0">
+          ${TUTORIAL_RULES.map((rule, index) => `
+            <li class="flex items-start gap-2.5 p-2.5 rounded-2xl bg-slate-800/60 border border-slate-700/60">
+              <span class="flex-shrink-0 w-6 h-6 rounded-full bg-cyan-500/20 text-cyan-300 font-bold text-xs flex items-center justify-center border border-cyan-500/30 mt-0.5">
+                ${index + 1}
+              </span>
+              <p class="m-0 leading-relaxed text-slate-300 flex-1">${escapeHtml(rule)}</p>
+            </li>
+          `).join("")}
+        </ol>
+      </div>
+
+      <!-- Rodapé do Modal -->
+      <div class="p-3 md:p-4 border-t border-slate-700/60 bg-slate-900/60 flex justify-end flex-shrink-0">
+        <button
+          id="btn-confirm-tutorial"
+          type="button"
+          class="px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-900 font-black text-xs md:text-sm shadow-lg shadow-cyan-500/20 active:scale-98 transition focus:outline-none focus:ring-2 focus:ring-cyan-300 cursor-pointer"
+        >
+          Entendi, vamos jogar!
+        </button>
+      </div>
+    </div>
+  `;
+
+  // Fechar ao clicar fora (backdrop)
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) {
+      closeTutorialModal();
+    }
+  });
+
+  document.body.appendChild(backdrop);
+
+  // Botões de fechar
+  document.getElementById("btn-close-tutorial")?.addEventListener("click", closeTutorialModal);
+  document.getElementById("btn-confirm-tutorial")?.addEventListener("click", closeTutorialModal);
+
+  // Fechar por Escape e conter o foco dentro do modal (Tab / Shift+Tab)
+  tutorialKeydownHandler = (e) => {
+    if (e.key === "Escape") {
+      closeTutorialModal();
+      return;
+    }
+    if (e.key === "Tab") {
+      const activeId = document.activeElement?.id || "";
+      const targetId = getTutorialFocusTarget(activeId, !!e.shiftKey);
+      if (targetId) {
+        if (typeof e.preventDefault === "function") e.preventDefault();
+        document.getElementById(targetId)?.focus();
+      }
+    }
+  };
+  window.addEventListener("keydown", tutorialKeydownHandler);
+
+  // Foco inicial no próprio diálogo: o leitor de tela anuncia o título e a lista começa visível no topo
+  document.getElementById(TUTORIAL_CONTAINER_ID)?.focus();
+
+  return backdrop;
+}
+
+// Fecha o modal de tutorial, remove listeners e devolve o foco ao botão que o abriu
+export function closeTutorialModal() {
+  if (typeof document === "undefined") return;
+  const backdrop = document.getElementById("tutorial-modal-backdrop");
+  if (backdrop && backdrop.parentNode) {
+    backdrop.parentNode.removeChild(backdrop);
+  }
+  if (tutorialKeydownHandler && typeof window !== "undefined") {
+    window.removeEventListener("keydown", tutorialKeydownHandler);
+    tutorialKeydownHandler = null;
+  }
+
+  // Se a tela foi redesenhada com o modal aberto, o botão original deixou de existir no DOM:
+  // nesse caso o foco vai para o botão "?" da tela atual.
+  const opener = tutorialOpenerElement;
+  tutorialOpenerElement = null;
+  const target = opener && opener !== document.body && opener.isConnected !== false
+    ? opener
+    : document.getElementById("btn-open-tutorial");
+  if (target && typeof target.focus === "function") target.focus();
+}
+
 
 const AVATAR_LIST = ["🦊", "🦁", "🐼", "🐸", "🦄", "🚀", "🎭", "🎩", "👑", "🍕", "🥑", "🎸", "🐱", "🐶", "🐵", "🐯"];
 
@@ -48,10 +267,22 @@ function renderHome(container) {
         <div class="absolute -top-12 -left-12 w-32 h-32 bg-cyan-500/20 rounded-full blur-2xl"></div>
         <div class="absolute -bottom-12 -right-12 w-32 h-32 bg-pink-500/20 rounded-full blur-2xl"></div>
 
+        <!-- Botão Tutorial / Ajuda no canto superior direito -->
+        <button
+          id="btn-open-tutorial"
+          type="button"
+          aria-label="Como jogar / Tutorial de Regras"
+          aria-haspopup="dialog"
+          title="Como jogar?"
+          class="absolute top-4 right-4 w-9 h-9 rounded-full bg-slate-800/90 hover:bg-slate-700 text-cyan-300 border border-slate-700/80 font-black text-sm flex items-center justify-center shadow-md hover:scale-105 active:scale-95 transition z-20 cursor-pointer focus:outline-none focus:ring-2 focus:ring-cyan-400"
+        >
+          ?
+        </button>
+
         <!-- Cabeçalho / Logo -->
         <div class="text-center mb-6">
-          <img src="/images/logo.svg" alt="Logo Quem Sou Eu" class="w-24 h-24 mx-auto mb-3 drop-shadow-2xl animate-pulse-subtle" />
-          <h1 class="text-3xl md:text-4xl font-black tracking-tight text-white m-0">QUEM SOU EU?</h1>
+          <img src="/images/logo.svg" alt="Logo Quem Sou?" class="w-24 h-24 mx-auto mb-3 drop-shadow-2xl animate-pulse-subtle" />
+          <h1 class="text-3xl md:text-4xl font-black tracking-tight text-white m-0">QUEM SOU?</h1>
           <p class="text-slate-400 text-xs md:text-sm font-medium mt-1">O clássico jogo da palavra na testa em tempo real</p>
         </div>
 
@@ -148,7 +379,7 @@ function bindHomeEvents() {
       });
       btn.className = "avatar-option flex-none w-11 h-11 text-2xl rounded-2xl flex items-center justify-center transition bg-cyan-500 ring-2 ring-cyan-300 scale-110 shadow-lg shadow-cyan-500/30";
       state.playerAvatar = btn.dataset.avatar;
-      localStorage.setItem("qse_avatar", state.playerAvatar);
+      safeStorage.setItem("qse_avatar", state.playerAvatar);
     });
   });
 
@@ -190,7 +421,7 @@ function bindHomeEvents() {
       if (res && res.success) {
         state.roomCode = res.code;
         state.room = res.room;
-        state.currentScreen = res.room.state === "playing" ? "game" : "lobby";
+        state.currentScreen = getScreenForRoomState(res.room?.state);
         renderCurrentScreen();
       } else {
         showToast(res?.error || "Erro ao entrar na sala.", "error");
@@ -203,6 +434,12 @@ function bindHomeEvents() {
     toggleSound();
     renderCurrentScreen();
   });
+
+  // Abrir Tutorial de Regras
+  const btnOpenTutorial = document.getElementById("btn-open-tutorial");
+  btnOpenTutorial?.addEventListener("click", () => {
+    openTutorialModal(btnOpenTutorial);
+  });
 }
 
 // ==========================================
@@ -213,7 +450,7 @@ function renderLobby(container) {
   if (!room) return;
 
   const isHost = room.hostId === state.myId;
-  const joinUrl = `${window.location.origin}/?room=${room.code}`;
+  const joinUrl = getShareUrl(room.code);
   const qrUrl = `/api/qr?data=${encodeURIComponent(joinUrl)}`;
 
   const selectedCategories = room.settings?.categories || ["celebridades", "desenhos", "animais", "objetos", "profissoes"];
@@ -230,6 +467,16 @@ function renderLobby(container) {
         <div class="flex items-center gap-2">
           <span class="text-xs font-bold text-slate-400">Código da Sala:</span>
           <span class="px-3 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 font-black text-lg tracking-widest border border-cyan-500/40">${room.code}</span>
+          <button
+            id="btn-open-tutorial"
+            type="button"
+            aria-label="Como jogar / Tutorial de Regras"
+          aria-haspopup="dialog"
+            title="Como jogar?"
+            class="w-8 h-8 rounded-full bg-slate-800/90 hover:bg-slate-700 text-cyan-300 border border-slate-700/80 font-black text-sm flex items-center justify-center shadow-md hover:scale-105 active:scale-95 transition cursor-pointer ml-1 focus:outline-none focus:ring-2 focus:ring-cyan-400"
+          >
+            ?
+          </button>
         </div>
       </div>
 
@@ -376,9 +623,15 @@ function bindLobbyEvents(isHost, currentCategories) {
     renderCurrentScreen();
   });
 
+  // Abrir Tutorial de Regras
+  const btnOpenTutorial = document.getElementById("btn-open-tutorial");
+  btnOpenTutorial?.addEventListener("click", () => {
+    openTutorialModal(btnOpenTutorial);
+  });
+
   // Copiar Link
   document.getElementById("btn-copy-link")?.addEventListener("click", () => {
-    const joinUrl = `${window.location.origin}/?room=${state.roomCode}`;
+    const joinUrl = getShareUrl(state.roomCode);
     navigator.clipboard.writeText(joinUrl).then(() => {
       showToast("Link da sala copiado com sucesso!", "success");
     }).catch(() => {
@@ -671,6 +924,18 @@ function renderGame(container) {
   const room = state.room;
   if (!room) return;
 
+  const prevChatContainer = document.getElementById("chat-messages-container");
+  const chatScrollSnapshot = prevChatContainer
+    ? {
+        wasAtBottom: shouldFollowChatScroll(
+          prevChatContainer.scrollTop,
+          prevChatContainer.scrollHeight,
+          prevChatContainer.clientHeight
+        ),
+        scrollTop: prevChatContainer.scrollTop
+      }
+    : null;
+
   const isMyTurn = room.activePlayerId === state.myId;
   const isCelebration = room.state === "turn_celebration";
   const activePlayer = room.players.find((p) => p.id === room.activePlayerId);
@@ -734,10 +999,10 @@ function renderGame(container) {
         </div>
       </header>
 
-      <!-- Layout Principal estilo Gartic: 3 Colunas com rolagem interna estrita -->
+      <!-- Layout Principal: 3 Colunas com rolagem interna estrita (3/12 Placar, 4/12 Palco Central, 5/12 Chat) -->
       <div class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0 overflow-y-auto lg:overflow-hidden pb-1">
-        <!-- Coluna Esquerda: Placar e Jogadores Conectados -->
-        <div class="lg:col-span-3 glass-panel p-3 rounded-3xl flex flex-col max-h-[220px] lg:max-h-full min-h-0 overflow-hidden flex-shrink-0">
+        <!-- Coluna Esquerda: Placar e Jogadores Conectados (${BOARD_LAYOUT_SPANS.scoreboard}/12) -->
+        <div class="lg:col-span-${BOARD_LAYOUT_SPANS.scoreboard} glass-panel p-3 rounded-3xl flex flex-col max-h-[220px] lg:max-h-full min-h-0 overflow-hidden flex-shrink-0">
           <h3 class="text-xs font-black uppercase text-slate-400 tracking-wider mb-2 flex items-center justify-between flex-shrink-0">
             <span>Classificação</span>
             <span>🏆 Pontos</span>
@@ -776,8 +1041,8 @@ function renderGame(container) {
           </div>
         </div>
 
-        <!-- Coluna Central: A MESA E O CARTÃO NA TESTA -->
-        <div class="lg:col-span-5 flex flex-col gap-2 min-h-0 flex-shrink-0 lg:flex-shrink">
+        <!-- Coluna Central: A MESA E O CARTÃO NA TESTA (${BOARD_LAYOUT_SPANS.centerStage}/12) -->
+        <div class="lg:col-span-${BOARD_LAYOUT_SPANS.centerStage} flex flex-col gap-2 min-h-0 flex-shrink-0 lg:flex-shrink">
           <div class="glass-panel p-4 md:p-5 rounded-3xl flex-1 flex flex-col items-center justify-center text-center relative overflow-hidden">
             ${isCelebration ? `
               <!-- ESTADO DE CELEBRAÇÃO / TRANSIÇÃO ENTRE TURNOS -->
@@ -800,8 +1065,12 @@ function renderGame(container) {
                 </h2>
                 
                 <div class="my-3 px-6 py-2.5 rounded-2xl bg-slate-800/90 border border-slate-700 text-center max-w-sm w-full">
-                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">A palavra secreta era:</span>
-                  <span class="text-xl md:text-2xl font-black text-cyan-300 tracking-wide">${escapeHtml(wordRevealed || "???")}</span>
+                  ${turnResult?.outcome === 'correct' && wordRevealed ? `
+                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">A palavra secreta era:</span>
+                    <span class="text-xl md:text-2xl font-black text-cyan-300 tracking-wide">${escapeHtml(wordRevealed)}</span>
+                  ` : `
+                    <span class="text-xs font-bold text-slate-300 block">🔒 A palavra continua secreta para a próxima tentativa na fila!</span>
+                  `}
                 </div>
 
                 ${turnResult?.outcome === 'correct' ? `
@@ -819,7 +1088,7 @@ function renderGame(container) {
                 <span class="px-3 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-black uppercase tracking-wider mb-2 border border-amber-500/40">
                   SUA PALAVRA NA TESTA
                 </span>
-                <h2 class="text-xl md:text-3xl font-black text-white m-0 tracking-wide">QUEM SOU EU?</h2>
+                <h2 class="text-xl md:text-3xl font-black text-white m-0 tracking-wide">QUEM SOU?</h2>
                 <p class="text-xs font-bold text-cyan-300 mt-1">
                   🌟 Categoria: ${escapeHtml(myPlayer?.currentWord?.categoriaNome || "Geral")}
                 </p>
@@ -951,21 +1220,30 @@ function renderGame(container) {
                   <button
                     type="button"
                     data-quick-reaction="yes"
-                    class="py-2.5 px-2 rounded-2xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 font-black text-xs md:text-sm active:scale-95 transition flex items-center justify-center gap-1 shadow-md shadow-emerald-950/40"
+                    ${turnPhase === "awaiting_question" ? "disabled" : ""}
+                    class="py-2.5 px-2 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-black text-xs md:text-sm flex items-center justify-center gap-1 shadow-md shadow-emerald-950/40 transition ${
+                      turnPhase === "awaiting_question" ? "opacity-40 cursor-not-allowed" : "hover:bg-emerald-500/30 active:scale-95 cursor-pointer"
+                    }"
                   >
                     👍 SIM
                   </button>
                   <button
                     type="button"
                     data-quick-reaction="no"
-                    class="py-2.5 px-2 rounded-2xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 font-black text-xs md:text-sm active:scale-95 transition flex items-center justify-center gap-1 shadow-md shadow-rose-950/40"
+                    ${turnPhase === "awaiting_question" ? "disabled" : ""}
+                    class="py-2.5 px-2 rounded-2xl bg-rose-500/20 border border-rose-500/40 text-rose-300 font-black text-xs md:text-sm flex items-center justify-center gap-1 shadow-md shadow-rose-950/40 transition ${
+                      turnPhase === "awaiting_question" ? "opacity-40 cursor-not-allowed" : "hover:bg-rose-500/30 active:scale-95 cursor-pointer"
+                    }"
                   >
                     👎 NÃO
                   </button>
                   <button
                     type="button"
                     data-quick-reaction="maybe"
-                    class="py-2.5 px-2 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-black text-xs md:text-sm active:scale-95 transition flex items-center justify-center gap-1 shadow-md shadow-amber-950/40"
+                    ${turnPhase === "awaiting_question" ? "disabled" : ""}
+                    class="py-2.5 px-2 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-300 font-black text-xs md:text-sm flex items-center justify-center gap-1 shadow-md shadow-amber-950/40 transition ${
+                      turnPhase === "awaiting_question" ? "opacity-40 cursor-not-allowed" : "hover:bg-amber-500/30 active:scale-95 cursor-pointer"
+                    }"
                   >
                     🤔 TALVEZ
                   </button>
@@ -975,8 +1253,8 @@ function renderGame(container) {
           </div>
         </div>
 
-        <!-- Coluna Direita: O CHAT COM ROLAGEM INTERNA CONTIDA -->
-        <div class="lg:col-span-4 glass-panel p-3 rounded-3xl flex flex-col h-[340px] lg:h-full min-h-0 overflow-hidden flex-shrink-0">
+        <!-- Coluna Direita: O CHAT COM ROLAGEM INTERNA CONTIDA (${BOARD_LAYOUT_SPANS.chat}/12) -->
+        <div class="lg:col-span-${BOARD_LAYOUT_SPANS.chat} glass-panel p-3 rounded-3xl flex flex-col h-[340px] lg:h-full min-h-0 overflow-hidden flex-shrink-0">
           <div class="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-700/50 flex-shrink-0">
             <h3 class="text-xs font-black uppercase text-slate-300 tracking-wider m-0 flex items-center gap-1.5">
               <span>💬</span> Chat da Sala
@@ -1013,7 +1291,7 @@ function renderGame(container) {
   `;
 
   bindGameEvents(isMyTurn, turnPhase);
-  populateInitialChat();
+  populateInitialChat(chatScrollSnapshot);
 }
 
 function bindGameEvents(isMyTurn, turnPhase) {
@@ -1080,7 +1358,7 @@ function bindGameEvents(isMyTurn, turnPhase) {
   });
 }
 
-function populateInitialChat() {
+function populateInitialChat(snapshot = null) {
   const container = document.getElementById("chat-messages-container");
   if (!container || !state.chatMessages) return;
 
@@ -1088,7 +1366,17 @@ function populateInitialChat() {
   state.chatMessages.forEach((msg) => {
     container.appendChild(renderMessageElement(msg));
   });
-  container.scrollTop = container.scrollHeight;
+
+  if (snapshot) {
+    container.scrollTop = calculateRestoredScrollPosition({
+      wasAtBottom: snapshot.wasAtBottom,
+      previousScrollTop: snapshot.scrollTop,
+      newScrollHeight: container.scrollHeight,
+      clientHeight: container.clientHeight
+    });
+  } else {
+    container.scrollTop = container.scrollHeight;
+  }
 }
 
 // Atualização precisa do temporizador sem re-renderizar a tela toda
